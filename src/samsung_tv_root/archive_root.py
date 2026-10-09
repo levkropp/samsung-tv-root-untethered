@@ -84,16 +84,24 @@ def _check_target(client: SdbClient) -> TargetAssessment:
         raise ArchiveRootError(
             "sdbd-tarlauncher lacks effective SETUID/SETGID capabilities"
         )
-    runtimes = _capture(client, "/usr/bin/dotnet --list-runtimes")
-    majors = {
-        int(match.group(1))
-        for line in runtimes.splitlines()
-        if (match := re.match(r"Microsoft\.NETCore\.App (\d+)\.\d+\.\d+\s+\[", line))
-    }
+    try:
+        runtimes = _capture(client, "/usr/bin/dotnet --list-runtimes")
+    except ArchiveRootError:
+        runtimes = _capture(
+            client, "ls /usr/share/dotnet/shared/Microsoft.NETCore.App/"
+        )
+    majors = set()
+    for line in runtimes.splitlines():
+        line = line.strip()
+        match = re.match(r"Microsoft\.NETCore\.App (\d+)\.\d+\.\d+\s+\[", line)
+        if match is None:
+            match = re.match(r"(\d+)\.\d+\.\d+$", line)
+        if match is not None:
+            majors.add(int(match.group(1)))
     if any(major >= 6 for major in majors):
         runtime = "6.0"
     elif 3 in majors and any(
-        re.match(r"Microsoft\.NETCore\.App 3\.1\.\d+\s+\[", line)
+        re.match(r"(Microsoft\.NETCore\.App )?3\.1\.\d+(\s+\[)?$", line.strip())
         for line in runtimes.splitlines()
     ):
         runtime = "3.1"
