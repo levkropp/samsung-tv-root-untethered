@@ -105,9 +105,18 @@ def audit() -> list[str]:
         for magic, description in FORBIDDEN_MAGIC.items():
             if data.startswith(magic):
                 failures.append(f"{description} content is not allowed: {relative}")
+        # Fork allowlist: documentation screenshots under docs/assets/ are
+        # the only permitted binary content (PNG magic enforced below).
+        is_allowed_image = (
+            path.suffix.lower() == ".png"
+            and relative.parts[:2] == ("docs", "assets")
+            and data.startswith(b"\x89PNG")
+        )
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
+            if is_allowed_image:
+                continue
             failures.append(f"non-UTF-8 file is not allowed: {relative}")
             continue
         for description, pattern in FORBIDDEN_TEXT.items():

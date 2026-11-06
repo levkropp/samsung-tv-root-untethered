@@ -61,7 +61,7 @@ Everything else in this doc hangs off those two.
 | Model | QN55Q60BAFXZC (Samsung Q60B 55"), platform `22_NIKEL_UHD` |
 | OS | Tizen 6.5.0 (`Tizen6/TV`), kernel `Linux Samsung 5.4.77 armv7l` |
 | Build | `T-NKLBAKUC-REL-202602250226`, software `T-NKLBAKUC-1720.7` |
-| LAN | TV at `192.0.2.60`, owner's Mac at `192.0.2.59` (DHCP — assume both may change) |
+| LAN | TV at `192.0.2.60`, owner's Mac at `192.0.2.59` (redacted; DHCP — assume both may change) |
 | Dev mode | ON, survives reboots. Enable via `Apps → Settings gear → 12345`. Host PC IP currently `192.0.2.59` |
 | Auto-update | OFF (keep it that way) |
 
