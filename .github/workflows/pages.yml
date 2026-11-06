@@ -4,7 +4,7 @@ name: pages
 # Pages must be configured with build type "GitHub Actions" (workflow).
 on:
   push:
-    branches: [untethered-boot-agent]
+    branches: [master]
     paths: ['site/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 

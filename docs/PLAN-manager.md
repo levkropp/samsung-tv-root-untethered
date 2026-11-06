@@ -420,7 +420,9 @@ the prebuilt .NET payloads from the fork's releases**.
 
 ## 10. P6 — repo, index, CI
 
-Fork layout (branch `untethered-boot-agent`, keep master as clean upstream mirror):
+Fork layout (consolidated 2026-11-06: `master` is the definitive fork
+history — the old `untethered-boot-agent` branch was merged in and deleted;
+pull `upstream/master` into `master` to sync):
 
 ```
 boot-agent/        agent v3→v4 (IL), staging generator, README        [exists]
@@ -541,7 +543,7 @@ everything (it is both the tooling channel and the wizard's verification channel
 /usr/share/dotnet.tizen/                                                      TV framework assemblies (agent build inputs; pulled to Mac too)
 ```
 
-Mac-side: `~/samsung-tv-root` (fork clone, branch `untethered-boot-agent`),
+Mac-side: `~/samsung-tv-root` (fork clone, `master`),
 `~/tv-preserve/1720.7/` (canonical backups, hashes, evidence, keypair, issue draft).
 Keep both updated as work proceeds; the MANIFEST.md there is the running lab notebook.
 
