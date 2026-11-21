@@ -54,7 +54,7 @@ Key results:
 | Untethered boot-time self-root — boot agent (ghservice squat) | shipped, then **retired** (window over HDMI, package-DB surgery) |
 | **AT-HUB vendor-hook boot root** — no app squat, no window, no Dev Mode dependency | **shipped 2026-11-06** (proven across cold boots, root at uptime ~10s, SMACK `System::Privileged`) |
 | sdb bridge — devIP stays `127.0.0.1`, host CLI through `TVROOT_BRIDGE_TOKEN` | shipped (M1) + immortal headless relay |
-| Module system + telemetry debloat modules | shipped (7 modules, systemd-supervised watchdogs) |
+| Module system + telemetry debloat modules | shipped (8 modules, systemd-supervised watchdogs) |
 | ghservice restored to stock (dll/manifest/DB row byte-verified) | done — HDMI popup gone for good |
 | On-TV screenshot via Samsung's own capture API | proven (PoC above) |
 

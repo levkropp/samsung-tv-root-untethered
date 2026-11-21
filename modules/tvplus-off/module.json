@@ -1,0 +1,9 @@
+{
+  "id": "tvplus-off",
+  "name": "Disable Samsung TV Plus",
+  "version": "1.0.0",
+  "description": "Turns off 'Autorun Samsung TV Plus' (db/menu/autorun_tv_plus), clears the boot-into-TV-Plus flag, masks the TV Plus backend (bms-service, slive-provider-daemon, slive-util) and reaps the standalone TV Plus app via a supervised 30s watchdog. Disable via the manager or the disabled flag; revival needs a reboot.",
+  "author": "Clément Péron",
+  "scripts": { "boot": "boot.sh" },
+  "minAgent": "4"
+}
