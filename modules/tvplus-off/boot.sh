@@ -66,10 +66,12 @@ touch $OPTOUT/bms $OPTOUT/slive-provider-daemon 2>/dev/null
 mkdir -p /run/user/5001 2>/dev/null
 touch /run/user/5001/bms_block 2>/dev/null
 
-# 4. runtime masks (also block manual and dbus starts) + stop.
+# 4. runtime masks (also block manual and dbus starts) + stop. --no-block:
+#    the module loop runs inside the boot agent's sdb session, and a blocking
+#    stop on a unit that is still activating can hold it for minutes.
 for u in $UNITS; do
     systemctl mask --runtime "$u" >/dev/null 2>&1
-    systemctl stop "$u" >/dev/null 2>&1
+    systemctl stop --no-block "$u" >/dev/null 2>&1
     systemctl reset-failed "$u" >/dev/null 2>&1
 done
 for u in bms slive-provider-daemon; do
