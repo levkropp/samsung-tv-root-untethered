@@ -39,7 +39,7 @@
 # Undo units (run once as root): systemctl unmask --runtime <unit>
 MODULE_DIR=${MODULE_DIR:-/opt/usr/share/selfroot/modules/samsung-telemetry-off}
 EVIDENCE=${EVIDENCE:-/home/owner/share/tmp/sdk_tools/selfroot-evidence}
-UIDIS="/home/owner/share/tmp/sdk_tools/selfroot-ui/modules/disabled/samsung-telemetry-off"
+UI=/home/owner/share/tmp/sdk_tools/selfroot-ui/modules
 chsmack -r -a 'User::App::Shared' /opt/usr/share/selfroot/modules 2>/dev/null
 
 # 1.2.3 cleanup: remove the legacy hijack unit on upgrade. /run is tmpfs, so
@@ -49,7 +49,7 @@ systemctl stop tvroot-hijack.service >/dev/null 2>&1
 rm -f /run/systemd/system/tvroot-hijack.service >/dev/null 2>&1
 systemctl reset-failed tvroot-hijack.service >/dev/null 2>&1
 
-if [ -f "$MODULE_DIR/disabled" ] || [ -s "$UIDIS" ]; then
+if [ -s "$UI/disabled/samsung-telemetry-off" ] || { [ -f "$MODULE_DIR/disabled" ] && [ ! -s "$UI/enabled/samsung-telemetry-off" ]; }; then
     systemctl stop tvroot-watchdog.service tvroot-hijack.service >/dev/null 2>&1
     exit 0
 fi

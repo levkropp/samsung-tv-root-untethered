@@ -6,9 +6,9 @@
 # Env: MODULE_DIR, EVIDENCE (set by the unit file).
 PATTERNS="acr-service-app|org.tizen.voice-app|ondevice-voice|voice-client|voice-interaction|bixbycapsuleviewer|bixby-prov|ssoservice|bms-service|voice-instant-app|voiceassistant-music|mybixby|wakeup-engine-bixby|iacr|cis-api-service-app"
 POOL=$(ps -ef | grep "launchpad-process-pool" | grep -v grep | tr -s " " | cut -d" " -f2 | head -1)
-UIDIS="/home/owner/share/tmp/sdk_tools/selfroot-ui/modules/disabled/samsung-telemetry-off"
+UI=/home/owner/share/tmp/sdk_tools/selfroot-ui/modules
 while true; do
-    if [ -f "$MODULE_DIR/disabled" ] || [ -s "$UIDIS" ]; then sleep 30; continue; fi
+    if [ -s "$UI/disabled/samsung-telemetry-off" ] || { [ -f "$MODULE_DIR/disabled" ] && [ ! -s "$UI/enabled/samsung-telemetry-off" ]; }; then sleep 30; continue; fi
     PIDS=$(ps -ef | grep -E "$PATTERNS" | grep -v grep | tr -s " " | cut -d" " -f2)
     for pid in $PIDS; do
         if [ "$pid" != "$$" ] && [ "$pid" != "1" ] && [ "$pid" != "$POOL" ]; then

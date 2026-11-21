@@ -15,9 +15,9 @@
 #
 # Disabled state: touch <module dir>/disabled or toggle in the manager.
 MODULE_DIR=${MODULE_DIR:-/opt/usr/share/selfroot/modules/cec-key-passthrough}
-UIDIS="/home/owner/share/tmp/sdk_tools/selfroot-ui/modules/disabled/cec-key-passthrough"
+UI=/home/owner/share/tmp/sdk_tools/selfroot-ui/modules
 
-if [ -f "$MODULE_DIR/disabled" ] || [ -s "$UIDIS" ]; then
+if [ -s "$UI/disabled/cec-key-passthrough" ] || { [ -f "$MODULE_DIR/disabled" ] && [ ! -s "$UI/enabled/cec-key-passthrough" ]; }; then
     systemctl stop tvroot-cec-keys.service >/dev/null 2>&1
     exit 0
 fi

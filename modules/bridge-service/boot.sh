@@ -8,8 +8,8 @@
 # Relay needs no root, but starting it here keeps one owner + one log.
 MODULE_DIR=${MODULE_DIR:-/opt/usr/share/selfroot/modules/bridge-service}
 EVIDENCE=${EVIDENCE:-/home/owner/share/tmp/sdk_tools/selfroot-evidence}
-UIDIS="/home/owner/share/tmp/sdk_tools/selfroot-ui/modules/disabled/bridge-service"
-if [ -f "$MODULE_DIR/disabled" ] || [ -s "$UIDIS" ]; then
+UI=/home/owner/share/tmp/sdk_tools/selfroot-ui/modules
+if [ -s "$UI/disabled/bridge-service" ] || { [ -f "$MODULE_DIR/disabled" ] && [ ! -s "$UI/enabled/bridge-service" ]; }; then
     systemctl stop tvroot-bridge.service >/dev/null 2>&1
     exit 0
 fi
