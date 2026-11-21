@@ -45,6 +45,11 @@ echo "$BOOT_TS at-hub runner: uid=$(id -u) ctx=$(cat /proc/self/attr/current 2>/
 mkdir -p "$UI_MODS/enabled" "$UI_MODS/disabled" 2>/dev/null
 chmod 0777 "$UI_MODS" "$UI_MODS/enabled" "$UI_MODS/disabled" 2>/dev/null
 chsmack -r -a _ "$UI_MODS" 2>/dev/null
+# Markers must stay User::App::Shared or the manager (User::Pkg::*) cannot
+# toggle them (UnauthorizedAccessException).
+for marker in "$UI_MODS"/enabled/* "$UI_MODS"/disabled/*; do
+    [ -f "$marker" ] && chsmack -a 'User::App::Shared' "$marker" 2>/dev/null
+done
 rm -rf "$UI_STATE"
 mkdir -p "$UI_STATE/enabled" "$UI_STATE/disabled"
 for state in enabled disabled; do
