@@ -51,9 +51,8 @@ UI_STATE=/tmp/selfroot-module-state
 mkdir -p "$UI_MODS/enabled" "$UI_MODS/disabled" 2>/dev/null
 chmod 0777 "$UI_MODS" "$UI_MODS/enabled" "$UI_MODS/disabled" 2>/dev/null
 chsmack -r -a _ "$UI_MODS" 2>/dev/null
-# The manager (User::Pkg::*) can only write User::App::Shared files, not
-# floor-labeled ones, so the markers must keep that label or every toggle
-# fails with UnauthorizedAccessException.
+# Markers must stay User::App::Shared or the manager (User::Pkg::*) cannot
+# toggle them (UnauthorizedAccessException).
 for marker in "$UI_MODS"/enabled/* "$UI_MODS"/disabled/*; do
   [ -f "$marker" ] && chsmack -a 'User::App::Shared' "$marker" 2>/dev/null
 done
