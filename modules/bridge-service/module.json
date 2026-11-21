@@ -1,7 +1,7 @@
 {
   "id": "bridge-service",
   "name": "Management bridge service",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Runs the token-gated sdb relay as a supervised headless service so management access survives manager close. Needs no root to relay.",
   "author": "levkropp",
   "scripts": { "boot": "boot.sh" },

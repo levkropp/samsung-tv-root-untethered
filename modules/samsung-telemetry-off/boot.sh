@@ -37,9 +37,15 @@
 # Disabled state: touch <module dir>/disabled (loops go dormant <30s,
 # services stopped; revival needs a reboot) - or toggle in the manager.
 # Undo units (run once as root): systemctl unmask --runtime <unit>
+#
+# Stops are queued with --no-block: the module loop runs inside the boot
+# agent's sdb session, and a blocking stop on a unit that is still
+# activating (appbinary-manager sat in "deactivating") held that session
+# for minutes, so the chain timed out and re-ran and the bridge was
+# unusable. The runtime masks already prevent restarts.
 MODULE_DIR=${MODULE_DIR:-/opt/usr/share/selfroot/modules/samsung-telemetry-off}
 EVIDENCE=${EVIDENCE:-/home/owner/share/tmp/sdk_tools/selfroot-evidence}
-UIDIS="/home/owner/share/tmp/sdk_tools/selfroot-ui/modules/disabled/samsung-telemetry-off"
+UI=/home/owner/share/tmp/sdk_tools/selfroot-ui/modules
 chsmack -r -a 'User::App::Shared' /opt/usr/share/selfroot/modules 2>/dev/null
 
 # 1.2.3 cleanup: remove the legacy hijack unit on upgrade. /run is tmpfs, so
@@ -49,7 +55,7 @@ systemctl stop tvroot-hijack.service >/dev/null 2>&1
 rm -f /run/systemd/system/tvroot-hijack.service >/dev/null 2>&1
 systemctl reset-failed tvroot-hijack.service >/dev/null 2>&1
 
-if [ -f "$MODULE_DIR/disabled" ] || [ -s "$UIDIS" ]; then
+if [ -s "$UI/disabled/samsung-telemetry-off" ] || { [ -f "$MODULE_DIR/disabled" ] && [ ! -s "$UI/enabled/samsung-telemetry-off" ]; }; then
     systemctl stop tvroot-watchdog.service tvroot-hijack.service >/dev/null 2>&1
     exit 0
 fi
@@ -67,7 +73,7 @@ for u in data-service \
          bms \
          appbinary-manager; do
     systemctl mask --runtime "$u.service" >/dev/null 2>&1
-    systemctl stop "$u.service" >/dev/null 2>&1
+    systemctl stop --no-block "$u.service" >/dev/null 2>&1
     printf '%s -> %s\n' "$u" "$(systemctl is-active "$u.service" 2>&1)"
 done
 for p in bms.path \
@@ -75,7 +81,7 @@ for p in bms.path \
          org.tizen.voice-app.path \
          slive-provider-daemon.path; do
     systemctl mask --runtime "$p" >/dev/null 2>&1
-    systemctl stop "$p" >/dev/null 2>&1
+    systemctl stop --no-block "$p" >/dev/null 2>&1
 done
 # binary rename floor: voice binaries stay renamed so aul launches fail.
 for b in /opt/usr/apps/org.tizen.voice-app/bin/voice-app \
