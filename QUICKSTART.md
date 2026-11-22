@@ -54,7 +54,7 @@ payloads; they do not require a local payload build. Put an unusual Tizen Studio
 location before the command, for example
 `./samsung-tv-root --sdb /path/to/sdb doctor`.
 
-These instructions describe v0.0.13 and the current source tree. `archive-root`
+These instructions describe v2026.11.22 and the current source tree. `archive-root`
 requires v0.0.9 or newer, or a source checkout. For v0.0.8 and earlier downloads,
 follow the bundled documentation or the
 [v0.0.8 README](https://github.com/chris-ritsen/samsung-tv-root/blob/v0.0.8/README.md).

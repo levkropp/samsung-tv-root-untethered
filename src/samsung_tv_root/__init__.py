@@ -1,3 +1,3 @@
 """Samsung TV root research tooling."""
 
-__version__ = "0.0.13"
+__version__ = "2026.11.22"

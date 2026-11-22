@@ -206,7 +206,7 @@ Samsung security boundary.
   host service, commands, and remapping.
 - [Research notes](docs/README.md): exploit reproduction and SWU key extraction.
 
-This README describes v0.0.13 and the current source tree. Older standalone
+This README describes v2026.11.22 and the current source tree. Older standalone
 releases have different commands; use their bundled documentation. The source
 does not track device tokens, serial numbers, private network configuration,
 firmware, extracted keys, or precompiled exploit payloads. The project is
