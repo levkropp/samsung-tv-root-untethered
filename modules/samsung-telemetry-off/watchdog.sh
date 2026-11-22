@@ -4,7 +4,7 @@
 # argument, UEP forbids that). Goes dormant while the module is disabled
 # (never exits - supervision would hot-loop restarts).
 # Env: MODULE_DIR, EVIDENCE (set by the unit file).
-PATTERNS="acr-service-app|org.tizen.voice-app|ondevice-voice|voice-client|voice-interaction|bixbycapsuleviewer|bixby-prov|ssoservice|bms-service|voice-instant-app|voiceassistant-music|mybixby|wakeup-engine-bixby|iacr|cis-api-service-app"
+PATTERNS="acr-service-app|ondevice-voice|voice-client|voice-interaction|bixbycapsuleviewer|bixby-prov|ssoservice|bms-service|voice-instant-app|voiceassistant-music|mybixby|wakeup-engine-bixby|iacr|cis-api-service-app"
 POOL=$(ps -ef | grep "launchpad-process-pool" | grep -v grep | tr -s " " | cut -d" " -f2 | head -1)
 UI=/home/owner/share/tmp/sdk_tools/selfroot-ui/modules
 while true; do

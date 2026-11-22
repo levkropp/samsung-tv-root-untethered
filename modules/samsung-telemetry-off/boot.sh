@@ -20,6 +20,13 @@
 #   and de-preloading does not stop it, so voice binaries live renamed
 #   and a 30s watchdog reaps the rest. csfs is EXCLUDED (SmartHub home UI
 #   framework, demand-launched legitimately - decompiled to confirm).
+# - org.tizen.voice-app is neither renamed nor killed (1.2.6):
+#   app-context-manager (/etc/tvctx-manager/appctx-config.json, rule
+#   voice-app.recovery) relaunches it on every stop. A kill, or a launch
+#   failing on the renamed binary, counts as a stop, so it looped ~1
+#   launch/s. It is deactivated in pkgmgr instead: amd refuses the launch
+#   before forking, so no stop is seen. The binary stays in place so a
+#   re-enabled app idles instead of looping.
 # NEVER match our own shell: collect PIDs first, then kill excluding $$,
 # PID 1 and the launchpad pool. (pkill -f once matched the runner's own
 # sh -c cmdline and cut its own transport mid-run.)
@@ -37,6 +44,7 @@
 # Disabled state: touch <module dir>/disabled (loops go dormant <30s,
 # services stopped; revival needs a reboot) - or toggle in the manager.
 # Undo units (run once as root): systemctl unmask --runtime <unit>
+# Undo voice-app (persistent): pkgcmd -A -t app -n org.tizen.voice-app --uid 5001
 #
 # Stops are queued with --no-block: the module loop runs inside the boot
 # agent's sdb session, and a blocking stop on a unit that is still
@@ -83,16 +91,19 @@ for p in bms.path \
     systemctl mask --runtime "$p" >/dev/null 2>&1
     systemctl stop --no-block "$p" >/dev/null 2>&1
 done
+# voice-app: deactivate, and undo the rename done by <= 1.2.5 (see header).
+pkgcmd -D -t app -n org.tizen.voice-app --uid 5001 >/dev/null 2>&1 && echo "deactivated org.tizen.voice-app"
+VA=/opt/usr/apps/org.tizen.voice-app/bin/voice-app
+[ -f "$VA.tvroot-disabled" ] && [ ! -e "$VA" ] && mv "$VA.tvroot-disabled" "$VA" 2>/dev/null && echo "restored $VA"
 # binary rename floor: voice binaries stay renamed so aul launches fail.
-for b in /opt/usr/apps/org.tizen.voice-app/bin/voice-app \
-         /opt/usr/apps/com.samsung.tv.ondevice-voice/bin/ondevice-voice \
+for b in /opt/usr/apps/com.samsung.tv.ondevice-voice/bin/ondevice-voice \
          /opt/usr/apps/org.tizen.voice-client/bin/stt-client \
          /opt/usr/apps/org.tizen.voice-client/bin/voice-client \
          /opt/usr/apps/com.samsung.tv.vif/bin/voice-interaction-framework \
          /opt/usr/apps/com.samsung.tv.bixbycapsuleviewer/bin/bixbycapsuleviewer; do
     [ -f "$b" ] && mv "$b" "$b.tvroot-disabled" 2>/dev/null && echo "renamed $b"
 done
-PATTERNS="acr-service-app|org.tizen.voice-app|ondevice-voice|voice-client|voice-interaction|bixbycapsuleviewer|bixby-prov|ssoservice|bms-service|voice-instant-app|voiceassistant-music|mybixby|wakeup-engine-bixby|iacr|cis-api-service-app"
+PATTERNS="acr-service-app|ondevice-voice|voice-client|voice-interaction|bixbycapsuleviewer|bixby-prov|ssoservice|bms-service|voice-instant-app|voiceassistant-music|mybixby|wakeup-engine-bixby|iacr|cis-api-service-app"
 POOL=$(ps -ef | grep "launchpad-process-pool" | grep -v grep | tr -s " " | cut -d" " -f2 | head -1)
 sweep() {
     PIDS=$(ps -ef | grep -E "$PATTERNS" | grep -v grep | tr -s " " | cut -d" " -f2)
