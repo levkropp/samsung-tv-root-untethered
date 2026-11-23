@@ -169,6 +169,7 @@
       <li><code>ad-telemetry-daemons-off</code> <span>— masks and stops the ad/analysis daemons (adagent, pisa, canalysis, context-aware, contents-recognition).</span></li>
       <li><code>sw-update-off</code> <span>— keeps the firmware update path inert so the pinned exploit surface stays pinned.</span></li>
       <li><code>tvplus-off</code> <span>— turns off “Autorun Samsung TV Plus”, clears the boot-into-TV-Plus flag, masks the bms/slive backend and reaps the standalone TV Plus app.</span></li>
+      <li><code>tvplus-replace</code> <span>— opens an app of your choice (<code>APP=</code> in <code>/opt/usr/share/selfroot/tvplus-replace.conf</code>) at power-on, after every wake from standby and on the remote's TV Plus button, through the TV's own app booting and key rules.</span></li>
       <li><code>cec-key-passthrough</code> <span>— stops the TV eating CEC remote keys so HDMI-CEC devices (e.g. a Fire TV stick) respond instantly.</span></li>
       <li><code>00-canary</code> <span>— boot-order canary + evidence markers.</span></li>
     </ul>
