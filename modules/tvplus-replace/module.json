@@ -1,0 +1,11 @@
+{
+  "id": "tvplus-replace",
+  "name": "Replace Samsung TV Plus with an app",
+  "version": "1.0.0",
+  "description": "Opens the app set in /opt/usr/share/selfroot/tvplus-replace.conf (APP=<app id>) at power-on, through the TV's own app booting (re-pinned at every boot and shutdown, with an app_launcher fallback) and after every wake from standby (deviced display-state listener), and on the remote's Samsung TV Plus button, through a tvctx-manager key rule (added at boot, removed at shutdown). AUTOSTART=0 or BUTTON=0 turn either part off. Does nothing until APP is set. Pairs with tvplus-off; the TV still flashes 'Not available' on the button because its own TV Plus handler fails. Disable via the manager or the disabled flag.",
+  "author": "Clément Péron",
+  "scripts": {
+    "boot": "boot.sh"
+  },
+  "minAgent": "4"
+}
