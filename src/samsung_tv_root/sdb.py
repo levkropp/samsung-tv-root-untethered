@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import base64
 import os
 import re
@@ -261,6 +262,36 @@ class SdbBridgeProxy:
             finished.set()
 
 
+def add_bridge_options(parser: argparse.ArgumentParser) -> None:
+    """Expose the on-TV relay so a desktop can reach sdbd while devIP is 127.0.0.1."""
+    parser.add_argument(
+        "--bridge-token",
+        default=os.environ.get("TVROOT_BRIDGE_TOKEN"),
+        help="32 lowercase hex characters; defaults to TVROOT_BRIDGE_TOKEN",
+    )
+    parser.add_argument("--bridge-port", type=int, default=SDB_BRIDGE_PORT)
+
+
+def sweep_stale_loopback_devices(
+    run: Callable[[tuple[str, ...]], subprocess.CompletedProcess[str]],
+) -> None:
+    """Disconnect dead ``127.0.0.1:*`` device entries.
+
+    The sdb server holds a single loopback-device slot: a stale entry left by a
+    previous bridge proxy (for example after a TV reboot) makes every new
+    ``sdb connect 127.0.0.1:<proxy>`` fail until it is disconnected
+    (verified live 2026-10-09).
+    """
+    try:
+        result = run(("devices",))
+    except Exception:
+        return
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if fields and fields[0].startswith("127.0.0.1:"):
+            run(("disconnect", fields[0]))
+
+
 class SdbClient:
     def __init__(
         self,
@@ -285,19 +316,17 @@ class SdbClient:
         return f"{self.tv_host}:{SDB_PORT}"
 
     def connect(self) -> None:
-        # The sdb server holds a single loopback-device slot: a stale
-        # 127.0.0.1:* entry (dead proxy, e.g. after a TV reboot) makes every
-        # new `sdb connect 127.0.0.1:<proxy>` fail until it is disconnected.
-        # Sweep them first (verified live 2026-10-09).
         if self.bridge_token:
-            self._sweep_stale_loopback_devices()
-        if self.bridge_token and self._bridge_proxy is None:
-            self._bridge_proxy = SdbBridgeProxy(
-                self.tv_host,
-                self.bridge_port,
-                self.bridge_token,
+            sweep_stale_loopback_devices(
+                lambda arguments: self.run(arguments, check=False)
             )
-            self._bridge_proxy.start()
+            if self._bridge_proxy is None:
+                self._bridge_proxy = SdbBridgeProxy(
+                    self.tv_host,
+                    self.bridge_port,
+                    self.bridge_token,
+                )
+                self._bridge_proxy.start()
         try:
             result = self.run(("connect", self.serial), check=False)
         except Exception:
@@ -310,16 +339,6 @@ class SdbClient:
                 self._bridge_proxy.close()
                 self._bridge_proxy = None
             raise SdbError(command_failure("sdb connect", result))
-
-    def _sweep_stale_loopback_devices(self) -> None:
-        try:
-            result = self.run(("devices",), check=False)
-        except Exception:
-            return
-        for line in result.stdout.splitlines():
-            fields = line.split()
-            if fields and fields[0].startswith("127.0.0.1:"):
-                self.run(("disconnect", fields[0]), check=False)
 
     def require_device(self) -> None:
         result = self.run(("devices",), check=True)

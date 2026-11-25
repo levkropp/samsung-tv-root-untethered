@@ -17,7 +17,14 @@ from .compatibility import (
     TargetAssessment,
     TargetCompatibilityError,
 )
-from .sdb import CaptureResult, SdbClient, SdbError, find_sdb, route_callback_host
+from .sdb import (
+    SDB_BRIDGE_PORT,
+    CaptureResult,
+    SdbClient,
+    SdbError,
+    find_sdb,
+    route_callback_host,
+)
 from .terminal import relay_socket
 from .root_agent import (
     RootAgentConnection,
@@ -90,10 +97,18 @@ class Qn90bRootExploit:
         payload_directory: Path,
         *,
         sdb_timeout: float = 15.0,
+        bridge_token: str | None = None,
+        bridge_port: int = SDB_BRIDGE_PORT,
     ) -> None:
         self.tv_host = tv_host
         self.payload_directory = payload_directory.resolve()
-        self.sdb = SdbClient(find_sdb(), tv_host, timeout=sdb_timeout)
+        self.sdb = SdbClient(
+            find_sdb(),
+            tv_host,
+            timeout=sdb_timeout,
+            bridge_token=bridge_token,
+            bridge_port=bridge_port,
+        )
 
     def preflight(
         self,

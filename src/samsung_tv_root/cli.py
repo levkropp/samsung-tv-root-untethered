@@ -46,7 +46,7 @@ from .qn90f import (
 )
 from .qn90f_shell import DEFAULT_CONNECT_TIMEOUT as DEFAULT_SHELL_CONNECT_TIMEOUT
 from .qn90f_shell import DEFAULT_ROOT_SHELL_PORT
-from .sdb import SdbClient, SdbError, find_sdb
+from .sdb import SDB_BRIDGE_PORT, SdbClient, SdbError, add_bridge_options, find_sdb
 from .resources import payload_directory
 from .service import (
     ServiceError,
@@ -403,8 +403,16 @@ def preflight_qn90f(
     callback_host: str | None = None,
     bind_host: str | None = None,
     port: int = 0,
+    bridge_token: str | None = None,
+    bridge_port: int = SDB_BRIDGE_PORT,
 ) -> TargetAssessment:
-    client = SdbClient(find_sdb(), host, timeout=timeout)
+    client = SdbClient(
+        find_sdb(),
+        host,
+        timeout=timeout,
+        bridge_token=bridge_token,
+        bridge_port=bridge_port,
+    )
     client.connect()
     client.require_device()
     client.require_shell_injection()
@@ -453,6 +461,8 @@ def qn90b_exploit(
         arguments.host,
         arguments.payload_directory,
         sdb_timeout=arguments.sdb_timeout,
+        bridge_token=arguments.bridge_token,
+        bridge_port=arguments.bridge_port,
     )
     print_assessment(exploit.preflight(require_tested=require_tested))
     exploit.stage()
@@ -588,6 +598,8 @@ def command_qn90f_root(arguments: argparse.Namespace) -> int:
                 callback_host=arguments.callback_host,
                 bind_host=arguments.bind_host,
                 port=arguments.port,
+                bridge_token=arguments.bridge_token,
+                bridge_port=arguments.bridge_port,
             )
         )
     return run_root_session(
@@ -605,13 +617,22 @@ def command_qn90f_root(arguments: argparse.Namespace) -> int:
         pull=pull,
         shell_port=arguments.shell_port,
         shell_connect_timeout=arguments.shell_connect_timeout,
+        bridge_token=arguments.bridge_token,
+        bridge_port=arguments.bridge_port,
     )
 
 
 def command_qn90f_uep(arguments: argparse.Namespace) -> int:
     normalize_uep_arguments(arguments)
     resolve_direct_target(arguments, "qn90f")
-    print_assessment(preflight_qn90f(arguments.host, arguments.sdb_timeout))
+    print_assessment(
+        preflight_qn90f(
+            arguments.host,
+            arguments.sdb_timeout,
+            bridge_token=arguments.bridge_token,
+            bridge_port=arguments.bridge_port,
+        )
+    )
     payload = arguments.payload_directory / "MaliPhysicalProbe.dll"
     runtime = arguments.payload_directory / "MaliPhysicalProbe.runtimeconfig.json"
     missing = tuple(path.name for path in (payload, runtime) if not path.is_file())
@@ -621,7 +642,13 @@ def command_qn90f_uep(arguments: argparse.Namespace) -> int:
             + ", ".join(missing)
             + "; run make payloads"
         )
-    client = SdbClient(find_sdb(), arguments.host, timeout=arguments.sdb_timeout)
+    client = SdbClient(
+        find_sdb(),
+        arguments.host,
+        timeout=arguments.sdb_timeout,
+        bridge_token=arguments.bridge_token,
+        bridge_port=arguments.bridge_port,
+    )
     client.connect()
     result = client.inject(f"/bin/mkdir -p {QN90F_REMOTE_DIRECTORY}")
     if result.returncode not in (0, 1):
@@ -707,6 +734,7 @@ def add_transport_options(parser: argparse.ArgumentParser) -> None:
         help="configured television name; inferred when one model match exists",
     )
     parser.add_argument("--sdb-timeout", type=float, default=15.0)
+    add_bridge_options(parser)
 
 
 def add_root_options(
@@ -1072,12 +1100,7 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--callback-host")
         command.add_argument("--bind-host")
         command.add_argument("--sdb-timeout", type=float, default=15.0)
-        command.add_argument(
-            "--bridge-token",
-            default=os.environ.get("TVROOT_BRIDGE_TOKEN"),
-            help="32 lowercase hex characters; defaults to TVROOT_BRIDGE_TOKEN",
-        )
-        command.add_argument("--bridge-port", type=int, default=26103)
+        add_bridge_options(command)
         command.add_argument("--accept-timeout", type=float, default=30.0)
         command.add_argument("--payload-directory", type=Path)
 

@@ -329,7 +329,13 @@ def test_qn90f_root_runs_preflight_by_default(monkeypatch) -> None:
     assert observed["assessment"] is assessment
     assert observed["preflight"] == (
         ("192.0.2.50", 15.0),
-        {"callback_host": None, "bind_host": None, "port": 49152},
+        {
+            "callback_host": None,
+            "bind_host": None,
+            "port": 49152,
+            "bridge_token": None,
+            "bridge_port": 26103,
+        },
     )
 
 
@@ -437,7 +443,15 @@ def test_qn90f_root_rejects_script_options_without_script() -> None:
 
 def test_qn90f_preflight_rejects_empty_callback_output(monkeypatch) -> None:
     class Client:
-        def __init__(self, executable: Path, host: str, *, timeout: float) -> None:
+        def __init__(
+            self,
+            executable: Path,
+            host: str,
+            *,
+            timeout: float,
+            bridge_token: str | None = None,
+            bridge_port: int = 26103,
+        ) -> None:
             pass
 
         def connect(self) -> None:
