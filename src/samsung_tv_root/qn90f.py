@@ -36,7 +36,9 @@ from .sdb import (
     SDB_BRIDGE_PORT,
     SdbBridgeProxy,
     add_bridge_options,
+    bridge_connect_failure,
     build_shell_injection,
+    connect_with_retries,
     find_sdb,
     route_callback_host,
     sdb_reported_error,
@@ -288,13 +290,17 @@ class SdbExploitClient:
                 )
                 self._bridge_proxy.start()
         try:
-            result = self._run(("connect", self.serial), check=False)
+            result = connect_with_retries(
+                lambda arguments: self._run(arguments, check=False), self.serial
+            )
         except BaseException:
             self.close()
             raise
         if result.returncode != 0:
             self.close()
-            raise SdbTransportError(_command_failure("sdb connect", result))
+            raise SdbTransportError(
+                bridge_connect_failure(result, bool(self.bridge_token))
+            )
 
     def close(self) -> None:
         if self._bridge_proxy is not None:

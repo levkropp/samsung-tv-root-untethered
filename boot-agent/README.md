@@ -44,8 +44,15 @@ start of each connection, then relays to `127.0.0.1:26101`. The default port is
 port from `1024` through `65535`. Connection attempts
 are recorded in
 `/home/owner/share/tmp/sdk_tools/selfroot-evidence/bridge.log`.
+
 The manager keeps only a port probe for its status page. (Before v5.12 the
 relay lived inside the manager process and died with it.)
+
+A bridged session is torn down when its peer goes silent: keepalive probes start after 15 s of no
+traffic and abort the connection after 3 unanswered probes 5 s apart, a session with no traffic at
+all is reaped after `idleTimeoutMs` (default 30 minutes), and a peer that never answers our FIN is
+reset after 1 s. That is deliberate — `sdbd` serves exactly one session, and one that stays pinned
+by a client that stopped existing can only be cleared by rebooting the television.
 
 The bridge token is sent in cleartext on the local network. Use a random token,
 keep it private, and use the bridge only on a trusted LAN.
@@ -91,6 +98,19 @@ python3 boot-agent/staging/build.py          # keypair + signed launch.sh tarbal
 TV_FRAMEWORK_DIR=/path/to/dotnet.tizen/framework \
   dotnet build boot-agent/boot-agent.csproj -c Release
 ```
+
+The headless relay is a separate build, and updating it on a television is a file swap plus a
+restart — nothing builds it during install:
+
+```
+dotnet build boot-agent/bridge-relay -c Release
+# push bin/Release/netcoreapp3.1/TvRootBridgeRelay.dll and its .runtimeconfig.json over
+# /opt/usr/share/selfroot/modules/bridge-service/ (keep a backup of the old dll), then:
+systemctl restart tvroot-bridge.service
+```
+
+Arguments are `[port] [tokenPath] [logPath] [idleTimeoutMs]` and `TVROOT_SDB_PORT` overrides the
+upstream for testing; `bridge-service/boot.sh` starts it with none, so the defaults apply.
 
 ## Deploy (one time)
 
