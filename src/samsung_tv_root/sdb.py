@@ -196,10 +196,11 @@ def bridge_connect_failure(
         return message
     return (
         f"{message}; the bridge relay took the token but sdbd refused the session, so its single "
-        "session is held by something else. The relay releases a client that has gone silent after "
-        "about thirty seconds, so a refusal that outlives that belongs to the television: another "
-        "sdb client, or a leaked upstream leg. bridge.log under selfroot-evidence says which - an "
-        "authorized line with no closed line is the leak - and a power cycle clears either"
+        "session belongs to something else. The relay releases a client that went silent after "
+        "about thirty seconds, so a refusal outliving that is the television's doing. bridge.log "
+        "under selfroot-evidence names the leg: `sdbd closed` with `0B to sdbd` is sdbd hanging up "
+        "on a connection it accepted, while `authorized` with no `closed` line would be the relay "
+        "still holding one. A power cycle clears the former"
     )
 
 

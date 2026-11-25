@@ -54,6 +54,13 @@ all is reaped after `idleTimeoutMs` (default 30 minutes), and a peer that never 
 reset after 1 s. That is deliberate — `sdbd` serves exactly one session, and one that stays pinned
 by a client that stopped existing can only be cleared by rebooting the television.
 
+Every session logs one `authorized` and one `closed` line, and the close names the leg that ended:
+`client closed` is us letting go, `sdbd closed` is the television accepting our loopback connection
+and hanging up without speaking (what a refused second session looks like), and `idle`,
+`socket error on client`, `socket error on sdbd` are the watchdog and a reset. A wedge is readable
+in one line — `authorized` with no `closed` means the relay still holds the session, `sdbd closed`
+with `0B to sdbd` means it never did.
+
 The bridge token is sent in cleartext on the local network. Use a random token,
 keep it private, and use the bridge only on a trusted LAN.
 

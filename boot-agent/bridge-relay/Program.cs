@@ -302,9 +302,11 @@ public static class BridgeRelay
     private sealed class BridgeSession
     {
         private const int Running = 0;
-        private const int PeerClosed = 1;
-        private const int IdleExpired = 2;
-        private const int SocketFailure = 3;
+        private const int ClientClosed = 1;
+        private const int UpstreamClosed = 2;
+        private const int IdleExpired = 3;
+        private const int ClientFailure = 4;
+        private const int UpstreamFailure = 5;
 
         private readonly TcpClient client;
         private readonly TcpClient upstream;
@@ -340,7 +342,8 @@ public static class BridgeRelay
                     var count = source.Read(buffer, 0, buffer.Length);
                     if (count <= 0)
                     {
-                        Interlocked.CompareExchange(ref reason, PeerClosed, Running);
+                        Interlocked.CompareExchange(
+                            ref reason, towardsSdbd ? ClientClosed : UpstreamClosed, Running);
                         break;
                     }
                     Interlocked.Exchange(ref lastActivity, Environment.TickCount64);
@@ -353,7 +356,8 @@ public static class BridgeRelay
             {
                 // sdbd resets connections in ordinary use, and so does a client that is killed. An
                 // ending is not a crash: record why and let the handler tear both legs down.
-                Interlocked.CompareExchange(ref reason, SocketFailure, Running);
+                Interlocked.CompareExchange(
+                    ref reason, towardsSdbd ? ClientFailure : UpstreamFailure, Running);
             }
             finally
             {
@@ -387,13 +391,21 @@ public static class BridgeRelay
         {
             StopWatchdog();
             var age = (Environment.TickCount64 - started) / 1000;
+            // Naming the leg that ended is the point: `sdbd closed, 0s, 0B to sdbd` is the
+            // television refusing a second session on a loopback connection it accepted and hung up
+            // on, while `client closed` is us. They were indistinguishable and a reboot was spent
+            // telling them apart.
             var why = reason == IdleExpired
                 ? "idle"
-                : reason == SocketFailure
-                    ? "socket error"
-                    : reason == PeerClosed
-                        ? "peer closed"
-                        : "ended";
+                : reason == UpstreamClosed
+                    ? "sdbd closed"
+                    : reason == ClientClosed
+                        ? "client closed"
+                        : reason == UpstreamFailure
+                            ? "socket error on sdbd"
+                            : reason == ClientFailure
+                                ? "socket error on client"
+                                : "ended";
             return "closed " + peer + " (session " + Id + ", " + why + ", " + age + "s, "
                 + Interlocked.Read(ref bytesToSdbd) + "B to sdbd, "
                 + Interlocked.Read(ref bytesToClient) + "B to client)";
