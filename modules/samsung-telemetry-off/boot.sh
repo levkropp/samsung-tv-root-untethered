@@ -158,6 +158,16 @@ for u in data-service pushd bms appbinary-manager issue_report_agent \
          com.samsung.tv.farfieldvoice com.samsung.tv.voiceid-service; do
     systemctl reset-failed "$u.service" >/dev/null 2>&1
 done
+# The .path/.socket/.busname companions above can fail on their own before this
+# module lands: a cold boot on QN65S90FAGXZB left the farfieldvoice path unit in
+# `masked failed failed`, which is exactly the noise that hides a real fault on a
+# TV with no journal.
+for u in bms.path com.samsung.tv.ondevice-voice.path org.tizen.voice-app.path \
+         slive-provider-daemon.path com.samsung.tv.farfieldvoice.path \
+         pushd.socket org.tizen.tv.appbinarymanager.busname \
+         org.tizen.tv.media.analytics.service.busname; do
+    systemctl reset-failed "$u" >/dev/null 2>&1
+done
 # supervised loop (unit file below runs this via cat|bash for UEP).
 WD=/opt/usr/share/selfroot/modules/samsung-telemetry-off/watchdog.sh
 RD=/run/systemd/system
