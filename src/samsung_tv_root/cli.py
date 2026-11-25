@@ -167,19 +167,23 @@ def apply_configured_sdb(
 def resolve_direct_target(arguments: argparse.Namespace, model: str) -> None:
     host = getattr(arguments, "host", None)
     profile_name = getattr(arguments, "profile", None)
-    if host is not None:
-        if profile_name is not None:
-            raise CommandError("use either HOST or --profile, not both")
-        return
+    if host is not None and profile_name is not None:
+        raise CommandError("use either HOST or --profile, not both")
 
+    # The configured sdb path applies whether HOST came from the command line or
+    # from a profile: standalone sdb packages are not on PATH, so a bare
+    # `... root <ip>` would otherwise die in find_sdb() before reaching the TV.
     path = arguments.config.expanduser().resolve()
-    if not path.is_file():
+    configuration = load_configuration(path) if path.is_file() else None
+    if configuration is not None:
+        apply_configured_sdb(arguments, configuration, path)
+    if host is not None:
+        return
+    if configuration is None:
         raise CommandError(
             f"HOST was omitted and no configuration exists at {path}; "
             "run 'samsung-tv-root config init' or provide HOST"
         )
-    configuration = load_configuration(path)
-    apply_configured_sdb(arguments, configuration, path)
     if profile_name is not None:
         television = configuration.television(profile_name)
         if television.model != model:

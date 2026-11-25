@@ -101,6 +101,31 @@ host = "192.0.2.50"
     assert Path(os.environ["SDB"]) == tmp_path / "tools" / "sdb"
 
 
+def test_direct_target_applies_configured_sdb_with_explicit_host(
+    tmp_path, monkeypatch
+) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        """version = 1
+sdb = "tools/sdb"
+
+[televisions.living-room]
+model = "qn90f"
+host = "192.0.2.50"
+""",
+        encoding="utf-8",
+    )
+    arguments = cli.build_parser().parse_args(
+        ["--config", str(config), "qn90f", "root", "192.0.2.77"]
+    )
+    monkeypatch.delenv("SDB", raising=False)
+
+    cli.resolve_direct_target(arguments, "qn90f")
+
+    assert arguments.host == "192.0.2.77"
+    assert Path(os.environ["SDB"]) == tmp_path / "tools" / "sdb"
+
+
 def test_direct_target_selects_named_profile(tmp_path) -> None:
     config = tmp_path / "config.toml"
     write_profiles(
