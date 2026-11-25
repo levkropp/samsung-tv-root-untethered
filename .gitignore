@@ -1,4 +1,5 @@
 /.venv/
+/.dotnet/
 /.pytest_cache/
 /dist/
 /build/
