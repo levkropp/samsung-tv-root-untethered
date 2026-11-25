@@ -140,13 +140,22 @@ def test_unobserved_regional_qn90f_build_spelling_remains_compatible() -> None:
     assert assessment.status is CompatibilityStatus.COMPATIBLE
 
 
-def test_unreviewed_regional_qn90f_build_fails_closed() -> None:
+def test_unreviewed_regional_qn90f_spelling_fails_closed() -> None:
     assessment = QN90F_PROFILE.assess(
-        qn90f_output(build="T-RSMFUABC-0090-REL-202701010101")
+        qn90f_output(build="T-RSMFZZZA-0090-REL-202701010101")
     )
 
     with pytest.raises(TargetCompatibilityError, match="not a reviewed"):
         assessment.require_compatible()
+
+
+def test_reviewed_regional_qn90f_prefix_is_compatible_untested() -> None:
+    assessment = QN90F_PROFILE.assess(
+        qn90f_output(build="T-RSMFUABC-0090-REL-202701010101")
+    ).require_compatible()
+
+    assert assessment.status is CompatibilityStatus.COMPATIBLE
+    assert any("differs from" in item for item in assessment.differences)
 
 
 def test_qn90f_without_r48p0_fails_before_exploit() -> None:
