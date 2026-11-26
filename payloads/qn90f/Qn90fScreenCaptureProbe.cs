@@ -277,6 +277,9 @@ internal static class Program
         string prefix = args[2];
         string mode = args.Length > 3 ? args[3] : "secvideo";
 
+        Console.WriteLine($"build=M88-post-4 argc={args.Length} "
+            + string.Join(" ", System.Linq.Enumerable.Select(args, (a, i) => $"[{i}]<{a}>len={a.Length}"))
+            + $" modeIsPost={(args.Length > 3 && args[3] == "post" ? "EQ" : "NE")}");
         Console.WriteLine($"probe mode={mode} idArg={idSpec} position={position} "
             + $"uid={getuid()} gid={getgid()} is64bit={Environment.Is64BitProcess} ptr={IntPtr.Size}");
 
@@ -286,7 +289,11 @@ internal static class Program
             if (mode == "drm") return RunDrm(card: position);
             if (mode == "mem") return RunMemRead(idSpec, prefix,
                 args.Length > 4 ? args[4] : "contents-ui-detector-service");
-            if (mode == "post") return RunVtablePost(prefix, idSpec);
+            if (mode == "post")
+            {
+                int budgetMs = cmdId > 0 ? Math.Min(cmdId, 20000) : 8000;
+                return RunVtablePostGuarded(prefix, idSpec, budgetMs);
+            }
             return RunCapiSweep(prefix);
         }
 
@@ -309,8 +316,36 @@ internal static class Program
             "tzauto" => RunAuto(prefix),
             "tzlist" => RunIdList(idSpec, prefix),
             "vconfwatch" => RunVconfWatch(cmdId),
-            _ => RunVendorWrapper(cmdId, position, prefix, mode, instance),
+            // secvideo and ppi stay reachable by name only. With a zeroed parameter struct
+            // secvideo_api_capture_screen writes through null plane pointers, corrupts the heap, and
+            // can hang holding the capture lock: observed 2026-11-26, when an unknown mode took the
+            // old default arm, had to be SIGKILLed, and the set lost sdbd shortly afterwards.
+            "secvideo" => RunVendorWrapper(cmdId, position, prefix, "secvideo", instance),
+            "ppi" => RunVendorWrapper(cmdId, position, prefix, "ppi", instance),
+            _ => RejectUnknownMode(mode),
         };
+    }
+
+    private static int RejectUnknownMode(string mode)
+    {
+        Console.WriteLine($"unknown mode '{mode}'; refusing to call any capture entry point");
+        return 2;
+    }
+
+    // A caller-killed process that dies holding lockGlobal() is the suspected mechanism behind the
+    // sdbd death in M92, so the capture call now bounds itself: the slot runs on a pool thread and
+    // the main thread refuses to wait past `budgetMs`, printing a refusal and returning non-zero.
+    // The lock may still be held by the abandoned worker -- that is exactly why the *shell* must
+    // never SIGKILL this process. Kill the shell instead, and let the .NET guard have its way.
+    private static int RunVtablePostGuarded(string prefix, string slotSpec, int budgetMs)
+    {
+        var worker = System.Threading.Tasks.Task.Run(() => RunVtablePost(prefix, slotSpec));
+        if (!worker.Wait(budgetMs))
+        {
+            Console.WriteLine($"post: no answer within {budgetMs} ms; abandoning (do NOT SIGKILL)");
+            return 5;
+        }
+        return worker.Result;
     }
 
     // The exact sequence sa-ui-detector uses, which M74 never exercised. That sweep went through
