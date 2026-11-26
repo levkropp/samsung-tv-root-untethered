@@ -19,3 +19,7 @@
 *passphrase*.json
 __pycache__/
 *.pyc
+
+# fetched third-party packages, pinned by sha512 in MANIFEST.md
+vendor/nuget/*.nupkg
+vendor/nuget/ref/

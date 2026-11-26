@@ -7,8 +7,9 @@
     <Nullable>disable</Nullable>
     <DebugType>none</DebugType>
     <AssemblyName>TvRootCanary</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="lib/CanaryLib.csproj" />
+    <Compile Include="TvRootCanary.cs" />
   </ItemGroup>
 </Project>
