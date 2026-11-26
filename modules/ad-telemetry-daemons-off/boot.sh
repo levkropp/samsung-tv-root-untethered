@@ -28,7 +28,10 @@
 # ConditionPathExists in its unit file), so mask is the only lever there.
 #
 # Disabled state: touch <module dir>/disabled
-# Undo (run once as root): systemctl unmask --runtime <unit>; systemctl start <unit>
+# Undo (run once as root, ALL of it): systemctl unmask <u> && systemctl daemon-reload && systemctl start <u>
+# Measured 2026-11-26 on QN65S90FAGXZB/T-RSMFUABC-0090: deleting the /run/systemd/system/<u> symlink
+# (or `unmask`) leaves `systemctl start` answering "Unit <u> is masked" until daemon-reload runs — the
+# masked state is cached in systemd's memory, not re-derived from /run. Both steps are required.
 # Vendor opt-out switches (negated ConditionPathExists in the unit files):
 # touching the matching path under /opt/usr/share/systemd/system keeps the
 # unit from starting at all — persistent, no mask needed, trivially reverted

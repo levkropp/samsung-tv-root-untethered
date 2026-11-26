@@ -105,11 +105,114 @@ internal static class Program
     private static extern int ioctl(int fd, uint request, IntPtr arg);
 
     private const int O_RDWR = 2;
+    private const int O_RDONLY = 0;
 
     [DllImport("libcapi-video-capture.so.0",
         EntryPoint = "_ZN12VideoCapture10lockGlobalENS_15CaptureLockTypeEi",
         CallingConvention = CallingConvention.Cdecl)]
     private static extern int capi_lock_global(IntPtr self, int type, int id);
+
+    /// <summary>
+    /// Read the retained frame out of a running vendor capture client instead of asking for one --
+    /// the method upstream actually uses (Qn90fScreenAnalysisDump.cs): the capture is performed by
+    /// the vendor's own whitelisted process and we only observe the buffer it keeps, through
+    /// /proc/&lt;pid&gt;/mem. Nothing here writes to the set beyond the output file.
+    ///
+    /// `singletonHex` is CaptureManager::m_pInstance's virtual address in the executable -- 0x24348
+    /// for /usr/bin/contents-ui-detector-service, 0x1d348 for /usr/bin/sa-ui-detector, both read out
+    /// of the ELF symbol table rather than guessed. The object layout (+0x08 initialized, +0x0c RGB
+    /// pointer, +0x1c/+0x20 width/height) came from a different instance of the class, so the header
+    /// is printed before it is used instead of being trusted.
+    /// </summary>
+    private static int RunMemRead(string singletonHex, string prefix, string exe)
+    {
+        uint singleton = Convert.ToUInt32(singletonHex, 16);
+        int pid = 0;
+        string matched = null;
+        foreach (string dir in Directory.GetDirectories("/proc"))
+        {
+            string leaf = dir.Substring(dir.LastIndexOf('/') + 1);
+            int candidate;
+            if (!int.TryParse(leaf, out candidate)) continue;
+            string cmd;
+            try { cmd = File.ReadAllText(dir + "/cmdline").Replace("\0", " ").Trim(); }
+            catch { continue; }
+            if (cmd.Contains(exe)) { pid = candidate; matched = cmd; break; }
+        }
+        if (pid == 0)
+        {
+            Console.WriteLine($"no process matching '{exe}'");
+            return 5;
+        }
+        Console.WriteLine($"pid={pid} cmd={matched}");
+
+        ulong baseAddr = 0;
+        string baseLine = null;
+        foreach (string line in File.ReadAllLines($"/proc/{pid}/maps"))
+        {
+            if (!line.EndsWith(exe, StringComparison.Ordinal)) continue;
+            ulong start = Convert.ToUInt64(line.Split('-')[0], 16);
+            if (baseAddr == 0 || start < baseAddr) { baseAddr = start; baseLine = line; }
+        }
+        if (baseAddr == 0)
+        {
+            Console.WriteLine($"no mapping ends with '{exe}'");
+            return 6;
+        }
+        Console.WriteLine($"base mapping: {baseLine}");
+
+        using (var mem = new FileStream($"/proc/{pid}/mem", FileMode.Open, FileAccess.Read))
+        {
+            if (singleton == 0)
+            {
+                // Sweep every singleton of the daemon in ONE process. Six dotnet cold starts in one
+                // root command exceeded the 45 s channel limit and locked sdbd out; the process costs
+                // ~7 s each on this firmware, so per-offset work belongs here, never in a shell loop.
+                var table = new (string Name, uint Off)[]
+                {
+                    ("CollectInfo", 0x242b0), ("CUDSKPICore", 0x242b8), ("EngineManager", 0x242e0),
+                    ("CUDSKPIHandler", 0x242e8), ("Analyzer", 0x242ec), ("CaptureManager", 0x24348),
+                };
+                foreach (var row in table)
+                    Console.WriteLine($"  {row.Name,-16} @base+0x{row.Off:x} -> 0x{ReadU32(mem, baseAddr + row.Off):x8}");
+                singleton = 0x24348;
+            }
+            ulong obj = ReadU32(mem, baseAddr + singleton);
+            Console.WriteLine($"singleton @base+0x{singleton:x} -> 0x{obj:x8}");
+            if (obj == 0) return 7;
+            Console.WriteLine("CaptureManager header:");
+            for (uint o = 0; o < 0x30; o += 4)
+                Console.WriteLine($"   +0x{o:x2} = 0x{ReadU32(mem, obj + o):x8}");
+            uint rgb = ReadU32(mem, obj + 0x0c);
+            uint w = ReadU32(mem, obj + 0x1c);
+            uint h = ReadU32(mem, obj + 0x20);
+            Console.WriteLine($"rgb=0x{rgb:x8} w={w} h={h} expected={w * h * 3} bytes");
+            if (rgb == 0 || w == 0 || h == 0 || w > 4096 || h > 4096) return 8;
+            byte[] frame = new byte[w * h * 3];
+            int off = 0, got;
+            mem.Seek((long)rgb, SeekOrigin.Begin);
+            while (off < frame.Length && (got = mem.Read(frame, off,
+                (int)Math.Min(frame.Length - off, 1 << 20))) > 0) off += got;
+            int nz = 0;
+            for (int i = 0; i < off; i += 97) if (frame[i] != 0) nz++;
+            Console.WriteLine($"read {off} bytes, {nz} non-zero samples");
+            File.WriteAllBytes(prefix + "-mem.rgb", frame);
+            Console.WriteLine($"wrote {prefix}-mem.rgb");
+        }
+        return 0;
+    }
+
+    private static uint ReadU32(FileStream mem, ulong addr)
+    {
+        byte[] b = new byte[4];
+        try
+        {
+            mem.Seek((long)addr, SeekOrigin.Begin);
+            if (mem.Read(b, 0, 4) != 4) return 0;
+        }
+        catch { return 0; }
+        return BitConverter.ToUInt32(b, 0);
+    }
 
     [DllImport(Teec, EntryPoint = "TEEC_InitializeContext", CallingConvention = CallingConvention.Cdecl)]
     private static extern int teec_initialize_context(IntPtr name, IntPtr context);
@@ -166,10 +269,12 @@ internal static class Program
         Console.WriteLine($"probe mode={mode} idArg={idSpec} position={position} "
             + $"uid={getuid()} gid={getgid()} is64bit={Environment.Is64BitProcess} ptr={IntPtr.Size}");
 
-        if (mode == "cap" || mode == "drm" || mode == "capsweep")
+        if (mode == "cap" || mode == "drm" || mode == "capsweep" || mode == "mem")
         {
             if (mode == "cap") return RunCapiScreenPost(position, prefix);
             if (mode == "drm") return RunDrm(card: position);
+            if (mode == "mem") return RunMemRead(idSpec, prefix,
+                args.Length > 4 ? args[4] : "contents-ui-detector-service");
             return RunCapiSweep(prefix);
         }
 
