@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TV-side IL sshd (docs/MQTT-DESIGN.md transport step 1-3). Runs on the set's trimmed
+       /usr/bin/dotnet, .NET 6.0.9 ARM32, which the canary (M95) and the library survey (M97)
+       both proved. No apphost: the vendor loader starts the assembly. The three referenced
+       assemblies are the pinned NuGet packages in vendor/nuget (see MANIFEST.md); they are the
+       netstandard2.1 lib/ contents, which M97 verified load on the set. -->
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>TvRootSshd</AssemblyName>
+    <RootNamespace>TvRootSshd</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <UseAppHost>false</UseAppHost>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="TvRootSshd.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Microsoft.DevTunnels.Ssh">
+      <HintPath>../../../vendor/nuget/ref/Microsoft.DevTunnels.Ssh.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.DevTunnels.Ssh.Keys">
+      <HintPath>../../../vendor/nuget/ref/Microsoft.DevTunnels.Ssh.Keys.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>
