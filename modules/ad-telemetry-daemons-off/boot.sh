@@ -32,6 +32,14 @@
 # Measured 2026-11-26 on QN65S90FAGXZB/T-RSMFUABC-0090: deleting the /run/systemd/system/<u> symlink
 # (or `unmask`) leaves `systemctl start` answering "Unit <u> is masked" until daemon-reload runs — the
 # masked state is cached in systemd's memory, not re-derived from /run. Both steps are required.
+# Caution measured the same night: `systemctl stop` on a Restart=always unit plus daemon-reload is slow
+# enough that combining them with anything else in one root command crossed the CLI's 45 s window and left
+# sdbd refusing until a mains power cycle. If the set is merely in the masked state you want anyway, the
+# cheap undo is a power cycle - this script re-masks at boot, so no manual step is needed at all.
+# Scope note: contents-recognition-service and contents-ui-detector-service were unmasked and started once
+# to test whether their retained frame could be read for a Home Assistant camera. They do not produce one on
+# this firmware (the CaptureManager singleton stays NULL even while video plays), so they stay masked here
+# and are deliberately NOT excluded from UNITS.
 # Vendor opt-out switches (negated ConditionPathExists in the unit files):
 # touching the matching path under /opt/usr/share/systemd/system keeps the
 # unit from starting at all — persistent, no mask needed, trivially reverted
