@@ -49,7 +49,12 @@ internal static class Qn90fScreenAnalysisDump
             ExecutableInApps =
                 "/usr/apps/com.samsung.tv.screen-analysis-ui-detector/" +
                 "bin/sa-ui-detector",
-            ManagerPointerOffset = 0x1d2e4,
+            // Re-derived for the current firmware from CaptureManager::GetInstance(), which
+            // loads the singleton through GOT slot 0x1d22c (R_ARM_RELATIVE, in-place addend
+            // 0x1d348). The previous value 0x1d2e4 was the .bss slot of an older build; the
+            // field layout below is unchanged (verified against CaptureManager::Initialize
+            // and RunCaptureTZ, which calls YCtoRGB(Y, C, [this+0x10], [this+0x14], [this+0])).
+            ManagerPointerOffset = 0x1d348,
             InitializedOffset = 0x04,
             RgbBufferOffset = 0x00,
             WidthOffset = 0x10,
