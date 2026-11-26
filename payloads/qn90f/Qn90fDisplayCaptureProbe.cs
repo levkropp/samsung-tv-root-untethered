@@ -37,9 +37,11 @@
 //   Qn90fDisplayCaptureProbe.dll sweep <dir> [w h]        every app x mode, one line each
 //   Qn90fDisplayCaptureProbe.dll one <dir> <name> <app> <mode> <fmt> <w> <h>
 //   Qn90fDisplayCaptureProbe.dll sync <app> <mode> <w> <h> <name>
+//   Qn90fDisplayCaptureProbe.dll burst <dir> <n> [app mode fmt w h]   timed back-to-back captures
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 internal static class Program
@@ -63,6 +65,7 @@ internal static class Program
                 case "sweep": return Sweep(args);
                 case "one": return One(args);
                 case "sync": return Sync(args);
+                case "burst": return Burst(args);
                 default:
                     Console.WriteLine("usage: sweep <dir> [w h] | one <dir> <name> <app> <mode> <fmt> <w> <h> | sync <app> <mode> <w> <h> <name>");
                     return 2;
@@ -73,6 +76,36 @@ internal static class Program
             Console.WriteLine("probe_exception=" + e.GetType().Name + " " + e.Message);
             return 1;
         }
+    }
+
+    // Cadence matters for camera.tv_screen: a per-frame `dotnet` costs a 7-10 s runtime cold start,
+    // so the number that decides the design is back-to-back captures inside one live process.
+    private static int Burst(string[] args)
+    {
+        string dir = args.Length > 1 ? args[1] : "/opt/usr/share/selfroot/dcap";
+        int n = args.Length > 2 ? ParseInt(args[2], 6) : 6;
+        int app = args.Length > 3 ? ParseInt(args[3], 3) : 3;
+        int mode = args.Length > 4 ? ParseInt(args[4], 0) : 0;
+        int fmt = args.Length > 5 ? ParseInt(args[5], 0) : 0;
+        int w = args.Length > 6 ? ParseInt(args[6], 960) : 960;
+        int h = args.Length > 7 ? ParseInt(args[7], 540) : 540;
+        try { Directory.CreateDirectory(dir); } catch (Exception e) { Console.WriteLine("mkdir_error=" + e.Message); }
+        long totalMs = 0, totalBytes = 0; int ok = 0;
+        var sw = new Stopwatch();
+        for (int i = 0; i < n; i++)
+        {
+            sw.Restart();
+            int rc = CallToFile(dir, "burst-" + i, app, mode, fmt, w, h, out string path, out int ow, out int oh);
+            sw.Stop();
+            long len = 0;
+            try { if (File.Exists(path)) len = new FileInfo(path).Length; } catch (Exception) { }
+            totalMs += sw.ElapsedMilliseconds;
+            if (rc == 0 && len > 0) { ok++; totalBytes += len; }
+            Console.WriteLine("i={0} rc={1} ms={2} bytes={3} size={4}x{5} path={6}", i, rc, sw.ElapsedMilliseconds, len, ow, oh, path);
+        }
+        Console.WriteLine("burst fmt={0} n={1} ok={2} avg_ms={3} avg_bytes={4}", fmt, n, ok,
+            totalMs / Math.Max(1, n), ok == 0 ? 0 : totalBytes / ok);
+        return ok > 0 ? 0 : 3;
     }
 
     private static int Sweep(string[] args)

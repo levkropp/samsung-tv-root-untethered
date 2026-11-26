@@ -121,6 +121,18 @@ internal static class Program
                 catch (ObjectDisposedException) { break; }
 
                 Log("accepted remote={0}", client.Client.RemoteEndPoint);
+                // SO_LINGER is the whole fix for M103: with it, Close() blocks until the kernel has
+                // delivered the send buffer; without it, closing with data still unsent discards
+                // that data and sends RST. Over Wi-Fi a 150 KB stdout came through at a different
+                // short length every time (90 112, 106 496, 114 688) with ssh exiting 255, while
+                // loopback never lost a byte because the transfer finished before the close.
+                // NoDelay because an interactive shell must never wait on Nagle.
+                try
+                {
+                    client.LingerState = new LingerOption(true, 5);
+                    client.NoDelay = true;
+                }
+                catch (Exception e) { Log("sockopt=failed {0}", Trim(e.Message, 100)); }
                 if (opt.Once)
                 {
                     // Gate-3 smoke: prove the accept path and a port stay reachable, then go away.
@@ -246,6 +258,10 @@ internal static class Program
                         TaskScheduler.Default);
             }
         }
+        // The library closes its own stream, but the socket belongs to us. Disposing here -- with
+        // linger set at accept time -- is what flushes the last frame under RST pressure instead of
+        // leaving it to a finalizer that can close the descriptor at an arbitrary moment.
+        try { client.Dispose(); } catch (Exception) { }
     }
 
     /// <summary>
