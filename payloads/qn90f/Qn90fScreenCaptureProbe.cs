@@ -6,9 +6,20 @@
 //             Measured with Litefin live at 3840x2160: rc=-2 after a flat ~1030 ms for all 21
 //             id/slot combinations, before and after lockGlobal(type,id) (which itself answers -1),
 //             with the plane fields returned untouched. A constant that ignores every parameter is
-//             a fixed wait, not validation: the capture grant never arrives for a caller that has
-//             not claimed the scaler from the resource manager -- which the vendor's own client
-//             links (libtv-resource-manager.so.1) and this probe does not.
+//             a fixed wait, not validation: the grant never arrives for this caller. The reason
+//             offered at the time -- that the vendor client claims the scaler through
+//             libtv-resource-manager.so.1 and this probe does not -- is now falsified: neither
+//             sa-ui-detector nor screen-analysis-discovery-service links it (M77, M87), yet both
+//             capture through lockGlobal() plus a raw IVideoCapture vtable call.
+//   post      replay that vendor sequence exactly: IVideoCapture::getInstance(), the NO-ARGUMENT
+//             lockGlobal (vtable +0x34), then the slot itself -- +0x08 getScreenPostYUV as
+//             sa-ui-detector calls it at 0x3dfc, or +0x0c getVideoPostYUV as the discovery service
+//             calls it at 0xe06a -- with the parameter layout read off 0xdf4c..0xe0c4 (format
+//             0x0e0e0201 at out+0x04, 0x3c0/0x21c at +0x08/+0x0c, plane destinations at
+//             +0x20/+0x2c; 0xffff, 0xffff, 1 at in+0x10/+0x14/+0x18). M74 never tried this: it
+//             went through the libcapi wrapper and the lockGlobal(type,id) variant, which answers
+//             -1. Second argument: 0 sweeps both slots, or a hex slot pins one. rc=0 writes
+//             <prefix>-post-<slot>.bin and prints a changed/mean/distinct summary in place.
 //   capsweep  the same call across candidate scaler-device ids, printing vconf playback_info first
 //   drm       open /dev/dri/card<n> and DRM_IOCTL_GET_CAP. card0..2 are crw-rw-rw- root display
 //             (226:0/1/2), so the node itself needs no privilege; the capture ioctl is another ask.
@@ -269,12 +280,13 @@ internal static class Program
         Console.WriteLine($"probe mode={mode} idArg={idSpec} position={position} "
             + $"uid={getuid()} gid={getgid()} is64bit={Environment.Is64BitProcess} ptr={IntPtr.Size}");
 
-        if (mode == "cap" || mode == "drm" || mode == "capsweep" || mode == "mem")
+        if (mode == "cap" || mode == "drm" || mode == "capsweep" || mode == "mem" || mode == "post")
         {
             if (mode == "cap") return RunCapiScreenPost(position, prefix);
             if (mode == "drm") return RunDrm(card: position);
             if (mode == "mem") return RunMemRead(idSpec, prefix,
                 args.Length > 4 ? args[4] : "contents-ui-detector-service");
+            if (mode == "post") return RunVtablePost(prefix, idSpec);
             return RunCapiSweep(prefix);
         }
 
@@ -299,6 +311,103 @@ internal static class Program
             "vconfwatch" => RunVconfWatch(cmdId),
             _ => RunVendorWrapper(cmdId, position, prefix, mode, instance),
         };
+    }
+
+    // The exact sequence sa-ui-detector uses, which M74 never exercised. That sweep went through
+    // the libcapi wrapper and lockGlobal(CaptureLockType,int) (slot +0x3c), which answers -1; the
+    // vendor calls the *no-argument* lockGlobal (slot +0x34) and then IVideoCapture::getScreenPostYUV
+    // as a raw vtable call at +0x08 (0x3dfc in sa-ui-detector). Parameter layout copied from
+    // screen-analysis-discovery-service 0xdf4c..0xe0c4: the output struct carries the format word
+    // 0x0e0e0201 at +0x04, width 0x3c0 at +0x08, height 0x21c at +0x0c and the two plane
+    // destinations at +0x20 and +0x2c; the input struct is zeroed except 0xffff at +0x10 and +0x14
+    // and a one byte at +0x18. Slot 0x0c (getVideoPostYUV) is offered as a fallback because that is
+    // what the discovery service actually calls.
+    private delegate int CaptureSlotDelegate(IntPtr self, IntPtr input, IntPtr output);
+
+    private static int RunVtablePost(string prefix, string slotSpec)
+    {
+        const int InBytes = 0x110;
+        const int OutBytes = 0x2c0;
+        int width = 960;
+        int height = 540;
+        int planeBytes = width * height * 3 / 2;
+
+        IntPtr instance = get_instance();
+        Console.WriteLine($"IVideoCapture::getInstance -> 0x{instance:x}");
+        if (instance == IntPtr.Zero) return 3;
+        IntPtr vtable = Marshal.ReadIntPtr(instance);
+        Console.WriteLine($"vtable -> 0x{vtable:x}");
+
+        int[] slots = slotSpec == "0" || string.IsNullOrEmpty(slotSpec)
+            ? new[] { 0x08, 0x0c }
+            : new[] { Convert.ToInt32(slotSpec, 16) };
+
+        IntPtr input = Marshal.AllocHGlobal(InBytes);
+        IntPtr output = Marshal.AllocHGlobal(OutBytes);
+        IntPtr plane = Marshal.AllocHGlobal(planeBytes);
+        for (int i = 0; i < InBytes; i += 4) Marshal.WriteInt32((IntPtr)((long)input + i), 0);
+        for (int i = 0; i < OutBytes; i += 4) Marshal.WriteInt32((IntPtr)((long)output + i), 0);
+        for (int i = 0; i < planeBytes; i++) Marshal.WriteByte((IntPtr)((long)plane + i), 0x10);
+
+        Marshal.WriteInt32((IntPtr)((long)input + 0x10), 0xffff);
+        Marshal.WriteInt32((IntPtr)((long)input + 0x14), 0xffff);
+        Marshal.WriteByte((IntPtr)((long)input + 0x18), 1);
+        Marshal.WriteInt32((IntPtr)((long)output + 0x04), unchecked((int)0x0e0e0201));
+        Marshal.WriteInt32((IntPtr)((long)output + 0x08), width);
+        Marshal.WriteInt32((IntPtr)((long)output + 0x0c), height);
+        Marshal.WriteInt32((IntPtr)((long)output + 0x20), (int)(long)plane);
+        Marshal.WriteInt32((IntPtr)((long)output + 0x2c), (int)(long)plane + width * height);
+
+        int lr = lock_global(instance);
+        Console.WriteLine($"lockGlobal() -> {lr}");
+
+        int done = 1;
+        foreach (int slot in slots)
+        {
+            IntPtr fn = Marshal.ReadIntPtr((IntPtr)((long)vtable + slot));
+            Console.WriteLine($"slot +0x{slot:x2} -> fn 0x{fn:x}");
+            if (fn == IntPtr.Zero) continue;
+            var call = Marshal.GetDelegateForFunctionPointer<CaptureSlotDelegate>(fn);
+            long t0 = DateTime.UtcNow.Ticks;
+            int rc;
+            try
+            {
+                rc = call(instance, input, output);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"slot +0x{slot:x2} threw {e.GetType().Name}");
+                continue;
+            }
+            double ms = (DateTime.UtcNow.Ticks - t0) / TimeSpan.TicksPerMillisecond;
+            Console.WriteLine($"slot +0x{slot:x2} -> rc={rc} in {ms:F0} ms");
+            for (int o = 0x00; o <= 0x34; o += 4)
+            {
+                Console.WriteLine($"   out+0x{o:x02} = 0x{Marshal.ReadInt32((IntPtr)((long)output + o)):x8}");
+            }
+            if (rc != 0) continue;
+
+            var buf = new byte[planeBytes];
+            Marshal.Copy(plane, buf, 0, planeBytes);
+            int nz = 0;
+            long sum = 0;
+            var seen = new HashSet<byte>();
+            for (int i = 0; i < buf.Length; i++)
+            {
+                if (buf[i] != 0x10) nz++;
+                sum += buf[i];
+                seen.Add(buf[i]);
+            }
+            Console.WriteLine($"plane: changed={nz}/{planeBytes} mean={sum / planeBytes:F1} "
+                + $"distinct={seen.Count} first16={BitConverter.ToString(buf, 0, 16)}");
+            string path = $"{prefix}-post-{slot:x}.bin";
+            File.WriteAllBytes(path, buf);
+            Console.WriteLine($"wrote {path} ({buf.Length} bytes)");
+            done = 0;
+        }
+
+        Console.WriteLine($"unlockGlobal() -> {unlock_global(instance)}");
+        return done;
     }
 
     /// <summary>
