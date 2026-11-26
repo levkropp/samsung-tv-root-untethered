@@ -19,8 +19,13 @@
 //   * No PTY. Honouring pty-req needs forkpty(), i.e. fork() inside a live managed runtime; a
 //     wedged television costs a mains power cycle (incidents M92/M94). Consequence: `ssh tv 'cmd'`
 //     works and `ssh tv` gets a pipe-backed shell with no job control.
-//   * No exit-status reply: the library exposes no message type for it (measured: no *Exit* type),
-//     so the client sees status 0 regardless. Rely on stdout, not $?, until that changes.
+//   * Exit-status IS delivered even though the library ships no such message type (measured: no
+//     type containing "Exit" in any of the three assemblies): ExitStatusRequestMessage below writes
+//     the uint over the library's own SshDataWriter. Verified against OpenSSH 9.6 -- `exit 7`
+//     arrives at the client as 7.
+//   * The library never surfaces the client's CHANNEL_EOF, so exec infers end-of-stdin from a quiet
+//     inbox (StdinQuietMs). Consequence: a producer slower than that interval into a
+//     stdin-reading command would be truncated; sized uploads are unaffected either way.
 //   * The child is /bin/sh, a vendor-signed binary, so UEP is not involved.
 using System;
 using System.Collections.Concurrent;
@@ -50,6 +55,11 @@ internal static class Program
     // Dictionary entry measured on the set (M97): this library offers rsa-sha2-512, rsa-sha2-256,
     // ecdsa-sha2-nistp384 and ecdsa-sha2-nistp256, and no ed25519.
     private const string HostKeyAlgo = "rsa-sha2-512";
+    // Receive-side EOF does not exist in 3.12.42 (measured: SshChannel has exactly three events,
+    // non-public included, and none is EOF; SshSession has none either). Exec therefore treats a
+    // quiet inbox as end-of-input, which is what makes `ssh tv 'cat > f' < f` terminate.
+    private const int StdinQuietMs = 250;
+    private const int StdinFirstChunkMs = 2000;
     private static readonly object LogGate = new();
     private static string _logPath = "";
 
@@ -261,12 +271,18 @@ internal static class Program
                 catch (Exception) { }
             }
         };
-        // The library surfaces the remote's CHANNEL_EOF through Closed, so EOF must reach the
-        // child's stdin: without it `ssh tv 'cat > f' < f` leaves cat waiting forever and only
-        // appears to work because the client eventually gives up.
+        // Channel close is the only real end-of-input signal the library gives. It completes the
+        // inbox; the quiet-period rule in the stdin pump covers the normal case where the client
+        // sends EOF and then waits for the channel to end.
+        var peerClosed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Channel close is the only real end-of-input signal the library gives. It completes the
+        // inbox; the quiet-period rule in the stdin pump covers the normal case where the client
+        // sends EOF and then waits for the channel to end. Subscribing here -- before anything is
+        // ever sent -- is what lets the teardown wait for the peer instead of guessing at a delay.
         channel.Closed += (_, __) =>
         {
             started.TrySetResult(false);
+            peerClosed.TrySetResult(true);
             try { inbox.CompleteAdding(); } catch (Exception) { }
         };
 
@@ -324,15 +340,34 @@ internal static class Program
 
             var stdinLoop = Task.Run(() =>
             {
+                // The wait doubles as EOF detection for exec: StdinFirstChunkMs if nothing has ever
+                // arrived (the client may be opening a large file), StdinQuietMs after that. A
+                // command that ignores stdin exits on its own, so the grace costs nothing there;
+                // interactive shells wait forever because their stdin idles between keystrokes.
+                long sent = 0;
                 try
                 {
-                    foreach (byte[] bytes in inbox.GetConsumingEnumerable(outer))
+                    while (true)
                     {
+                        int wait = interactive ? Timeout.Infinite
+                            : sent > 0 ? StdinQuietMs : StdinFirstChunkMs;
+                        if (!inbox.TryTake(out byte[]? bytes, wait, outer))
+                        {
+                            if (interactive) { continue; }
+                            Log("stdin_end=inferred channel={0} bytes={1}", channel.ChannelId, sent);
+                            break;
+                        }
                         stdin.Write(bytes, 0, bytes.Length);
                         stdin.Flush();
+                        sent += bytes.Length;
+                        if (inbox.IsCompleted)
+                        {
+                            Log("stdin_end=closed channel={0} bytes={1}", channel.ChannelId, sent);
+                            break;
+                        }
                     }
                 }
-                catch (Exception) { /* child closed its stdin: normal at exit */ }
+                catch (Exception) { /* child closed its stdin, or the session ended: normal */ }
                 finally { try { stdin.Close(); } catch (Exception) { } }
             }, outer);
 
@@ -375,6 +410,17 @@ internal static class Program
             await SendExitStatusAsync(channel, proc, outer).ConfigureAwait(false);
             try { await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false); }
             catch (Exception) { }
+            // Then wait for the peer's CHANNEL_CLOSE before the session goes away. OpenSSH sends it
+            // only after it has read what we wrote, so leaving first means an abortive socket close
+            // -- RST -- that discards data still sitting in the client's receive queue. That is what
+            // truncates a 150 KB stdout at arbitrary offsets over Wi-Fi (M103) while staying
+            // invisible on loopback. Bounded, because a client that vanishes must not pin a channel.
+            long waitedAt = Stopwatch.GetTimestamp();
+            bool peerWent = false;
+            try { peerWent = peerClosed.Task.Wait(TimeSpan.FromSeconds(2)); } catch (Exception) { }
+            Log("peer_close waited_ms={0} seen={1} channel={2}",
+                (Stopwatch.GetTimestamp() - waitedAt) * 1000 / Stopwatch.Frequency, peerWent,
+                channel.ChannelId);
         }
         catch (Exception e)
         {
