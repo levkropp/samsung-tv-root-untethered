@@ -23,9 +23,11 @@
 //     type containing "Exit" in any of the three assemblies): ExitStatusRequestMessage below writes
 //     the uint over the library's own SshDataWriter. Verified against OpenSSH 9.6 -- `exit 7`
 //     arrives at the client as 7.
-//   * The library never surfaces the client's CHANNEL_EOF, so exec infers end-of-stdin from a quiet
-//     inbox (StdinQuietMs). Consequence: a producer slower than that interval into a
-//     stdin-reading command would be truncated; sized uploads are unaffected either way.
+//   * The library never surfaces the client's CHANNEL_EOF, so end-of-stdin is inferred from a quiet
+//     inbox (StdinQuietMs) -- for exec, and for any shell the client did not ask a PTY for. So
+//     `echo cmd | ssh tv` terminates while a real terminal keeps its stdin open indefinitely.
+//     Consequence: a producer slower than that interval into a stdin-reading command would be
+//     truncated; sized uploads are unaffected either way.
 //   * The child is /bin/sh, a vendor-signed binary, so UEP is not involved.
 using System;
 using System.Collections.Concurrent;
@@ -273,6 +275,9 @@ internal static class Program
         var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         string command = "";
         bool interactive = false;
+        // Never honoured, but recorded: a pty-req is the only evidence available that a human is
+        // typing, and that is exactly what decides whether stdin may be closed on a quiet inbox.
+        bool ptyRequested = false;
 
         // Bytes that arrive before the child exists must not be lost: an exec followed immediately
         // by input is normal for piped usage.
@@ -319,13 +324,19 @@ internal static class Program
                     e.ResponseContinuation = _ => { started.TrySetResult(true); return Task.CompletedTask; };
                     break;
                 case "pty-req":
+                    // Recorded, still acknowledged without effect -- a PTY needs forkpty() inside a
+                    // live managed runtime, and a wedged television costs a mains power cycle. The
+                    // flag is not decoration: it separates a terminal from a pipe that is about to
+                    // close, which is how `echo cmd | ssh tv` can finish instead of hanging.
+                    ptyRequested = true;
+                    goto case "window-change";
                 case "window-change":
                 case "env":
                 case "signal":
                 case "subsystem":
                 case "no-more-sessions@openssh.com":
-                    // Acknowledged without effect. A PTY is deliberately not allocated (see header);
-                    // refusing these would break ordinary clients in confusing ways instead.
+                    // Acknowledged without effect. Refusing these would break ordinary clients in
+                    // confusing ways rather than protect anything.
                     e.IsAuthorized = true;
                     e.ResponseTask = Task.FromResult<SshMessage>(new ChannelSuccessMessage());
                     break;
@@ -341,9 +352,12 @@ internal static class Program
         try { go = await started.Task.WaitAsync(TimeSpan.FromMinutes(2), outer).ConfigureAwait(false); }
         catch (Exception) { return; }
         if (!go) { return; }
-        Log("exec begin channel={0} interactive={1} window={2} packet={3} cmd={4}",
-            channel.ChannelId, interactive, channel.MaxWindowSize, channel.MaxPacketSize,
-            Trim(command, 180));
+        // A shell on a terminal waits forever, because its stdin idles between keystrokes. A shell
+        // with no pty-req is a pipe, and a pipe that has gone quiet is finished.
+        bool keepStdinOpen = interactive && ptyRequested;
+        Log("exec begin channel={0} interactive={1} pty={2} window={3} packet={4} cmd={5}",
+            channel.ChannelId, interactive, ptyRequested, channel.MaxWindowSize,
+            channel.MaxPacketSize, Trim(command, 180));
 
         Process? proc = null;
         var sendGate = new SemaphoreSlim(1, 1);
@@ -356,20 +370,20 @@ internal static class Program
 
             var stdinLoop = Task.Run(() =>
             {
-                // The wait doubles as EOF detection for exec: StdinFirstChunkMs if nothing has ever
-                // arrived (the client may be opening a large file), StdinQuietMs after that. A
-                // command that ignores stdin exits on its own, so the grace costs nothing there;
-                // interactive shells wait forever because their stdin idles between keystrokes.
+                // The wait doubles as EOF detection: StdinFirstChunkMs if nothing has ever arrived
+                // (the client may be opening a large file), StdinQuietMs after that. A command that
+                // ignores stdin exits on its own, so the grace costs nothing there. A terminal keeps
+                // its stdin open forever; only a shell with no pty-req is treated as a pipe.
                 long sent = 0;
                 try
                 {
                     while (true)
                     {
-                        int wait = interactive ? Timeout.Infinite
+                        int wait = keepStdinOpen ? Timeout.Infinite
                             : sent > 0 ? StdinQuietMs : StdinFirstChunkMs;
                         if (!inbox.TryTake(out byte[]? bytes, wait, outer))
                         {
-                            if (interactive) { continue; }
+                            if (keepStdinOpen) { continue; }
                             Log("stdin_end=inferred channel={0} bytes={1}", channel.ChannelId, sent);
                             break;
                         }
