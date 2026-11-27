@@ -1,8 +1,8 @@
 {
   "id": "ad-telemetry-daemons-off",
   "name": "Disable ad & telemetry daemons",
-  "version": "1.1.0",
-  "description": "1.1.0 adds the other two members of the contents-analysis stack (ui-detector, cognition manager) and the .path/.socket activation triggers, so the daemons no longer have a watcher re-arming them. Masks and stops Samsung's ad/telemetry daemons (adagent/pisa, canalysis, slive, contents recognition, context-aware, cis) at every boot.",
+  "version": "1.2.0",
+  "description": "1.2.0 adds five services a running-state audit found active and unmasked while the trio above were already masked: screen-analysis-service-manager (parent of the contents-* family, TLS-capable), app-context-manager and acm-watcher, com.samsung.tv.waapp-contents-provider, and emergency-log-transmitter, which also gets its own vendor switch at /tmp/eltlaunch.cond. reporterCA is left alone deliberately (DRM reporting under /opt/usr/apps/Ddrm, no network stack). 1.1.0 added the other two members of the contents-analysis stack (ui-detector, cognition manager) and the .path/.socket activation triggers, so the daemons no longer have a watcher re-arming them. Masks and stops Samsung's ad/telemetry daemons (adagent/pisa, canalysis, slive, contents recognition, context-aware, cis) at every boot.",
   "author": "levkropp",
   "scripts": { "boot": "boot.sh" },
   "minAgent": "4"
