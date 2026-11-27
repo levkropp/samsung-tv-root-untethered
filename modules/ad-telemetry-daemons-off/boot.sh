@@ -52,21 +52,7 @@ for o in pisa-service canalysis-daemon slive-provider-daemon \
          com.samsung.tv.context-aware-service; do
     touch $OPTOUT/$o 2>/dev/null
 done
-# emergency-log-transmitter carries its own switch: ConditionPathExists=!/tmp/eltlaunch.cond.
-# /tmp is tmpfs, so it is created here at every boot rather than once. Note that
-# acm-watcher also has a condition, ConditionPathExists=!/opt/usr/apps/MCS_mode, and it is
-# deliberately NOT used: that path is a shared mode flag, not a per-unit opt-out, and creating
-# it could switch something else on. The mask below is enough and says exactly what it means.
-touch /tmp/eltlaunch.cond 2>/dev/null
 
-# Five more found by a state audit rather than by name-matching the unit files: all were active
-# and unmasked, and none has a .path/.socket/.busname companion, so masking the service is the
-# complete job. screen-analysis-service-manager is the parent of the contents-* trio below and
-# keeps running while those are masked; app-context-manager is WantedBy=sysinit.target and
-# acm-watcher by basic.target, so masking them can leave a non-fatal failed *job* at boot, the
-# same shape as every other masked Wants here. reporterCA was considered and deliberately left
-# alone: it lives under /opt/usr/apps/Ddrm, so masking it risks DRM key exchange for no privacy
-# gain, and it carries no network stack of its own.
 UNITS="
 adagent-service
 pisa-service
@@ -78,11 +64,6 @@ contents-cognition-service-manager
 com.samsung.tv.context-aware-agent
 com.samsung.tv.context-aware-service
 com.samsung.tv.cis-api-service-app
-emergency-log-transmitter
-screen-analysis-service-manager
-app-context-manager
-acm-watcher
-com.samsung.tv.waapp-contents-provider
 "
 # Activation triggers for the services above, same treatment.
 COMPANIONS="
