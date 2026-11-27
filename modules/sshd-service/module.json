@@ -1,0 +1,9 @@
+{
+  "id": "sshd-service",
+  "name": "Managed-IL sshd (management door)",
+  "version": "0.1.0",
+  "description": "Runs TvRootSshd as a supervised headless service on port 22 with publickey-only auth, so management no longer needs an untether per command or risks wedging sdbd on a long command.",
+  "author": "levkropp",
+  "scripts": { "boot": "boot.sh" },
+  "minAgent": "4"
+}

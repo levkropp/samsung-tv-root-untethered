@@ -26,7 +26,7 @@ from .qn90f import (
     SdbExploitClient,
     TVDeviceProfile,
 )
-from .sdb import find_sdb, route_callback_host
+from .sdb import add_bridge_options, find_sdb, route_callback_host
 
 
 MAXIMUM_REQUEST_BYTES = 128 * 1024
@@ -314,7 +314,13 @@ async def serve(arguments: argparse.Namespace) -> int:
     )
     acquirer = Qn90fRootAcquirer(
         config,
-        SdbExploitClient(find_sdb(), arguments.host, timeout=arguments.sdb_timeout),
+        SdbExploitClient(
+            find_sdb(),
+            arguments.host,
+            timeout=arguments.sdb_timeout,
+            bridge_token=arguments.bridge_token,
+            bridge_port=arguments.bridge_port,
+        ),
     )
     lease = await acquirer.acquire()
     server = RootCommandServer(lease, arguments.control_file)
@@ -341,6 +347,7 @@ async def serve(arguments: argparse.Namespace) -> int:
 
 
 def add_serve_arguments(parser: argparse.ArgumentParser) -> None:
+    add_bridge_options(parser)
     parser.add_argument("host", nargs="?")
     parser.add_argument(
         "--profile",

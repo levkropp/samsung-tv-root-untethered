@@ -33,10 +33,16 @@ from .qn90f_shell import (
 )
 from .resources import payload_directory
 from .sdb import (
+    SDB_BRIDGE_PORT,
+    SdbBridgeProxy,
+    add_bridge_options,
+    bridge_connect_failure,
     build_shell_injection,
+    connect_with_retries,
     find_sdb,
     route_callback_host,
     sdb_reported_error,
+    sweep_stale_loopback_devices,
 )
 
 
@@ -252,19 +258,54 @@ class SdbExploitClient:
         tv_host: str,
         *,
         timeout: float = DEFAULT_SDB_TIMEOUT,
+        bridge_token: str | None = None,
+        bridge_port: int = SDB_BRIDGE_PORT,
     ) -> None:
         self.executable = executable
         self.tv_host = tv_host
         self.timeout = timeout
+        self.bridge_token = bridge_token or os.environ.get("TVROOT_BRIDGE_TOKEN")
+        self.bridge_port = bridge_port
+        self._bridge_proxy: SdbBridgeProxy | None = None
 
     @property
     def serial(self) -> str:
+        if self._bridge_proxy is not None:
+            return self._bridge_proxy.serial
         return f"{self.tv_host}:{SDB_PORT}"
 
     def connect(self) -> None:
-        result = self._run(("connect", self.serial), check=False)
+        # A token routes the exploit through the on-TV relay so it works while
+        # Developer Mode Host PC IP stays 127.0.0.1 (sdbd authorizes the relay's
+        # loopback peer, not this desktop). See docs/PLAN-manager.md section 2.
+        if self.bridge_token:
+            sweep_stale_loopback_devices(
+                lambda arguments: self._run(arguments, check=False)
+            )
+            if self._bridge_proxy is None:
+                self._bridge_proxy = SdbBridgeProxy(
+                    self.tv_host,
+                    self.bridge_port,
+                    self.bridge_token,
+                )
+                self._bridge_proxy.start()
+        try:
+            result = connect_with_retries(
+                lambda arguments: self._run(arguments, check=False), self.serial
+            )
+        except BaseException:
+            self.close()
+            raise
         if result.returncode != 0:
-            raise SdbTransportError(_command_failure("sdb connect", result))
+            self.close()
+            raise SdbTransportError(
+                bridge_connect_failure(result, bool(self.bridge_token))
+            )
+
+    def close(self) -> None:
+        if self._bridge_proxy is not None:
+            self._bridge_proxy.close()
+            self._bridge_proxy = None
 
     def reset_connection(self) -> None:
         self._run(("disconnect", self.serial), check=False)
@@ -378,7 +419,11 @@ class Qn90fRootAcquirer:
     async def acquire(self) -> Qn90fRootLease:
         self.validate_target()
         await asyncio.to_thread(self.sdb.connect)
-        return await self._acquire_connected()
+        try:
+            return await self._acquire_connected()
+        except BaseException:
+            self.sdb.close()
+            raise
 
     async def _acquire_connected(self) -> Qn90fRootLease:
         with tempfile.TemporaryDirectory(prefix="qn90f-root-session-") as directory:
@@ -589,7 +634,10 @@ class Qn90fRootSession:
             await lease.shutdown()
             return status
         finally:
-            await lease.close()
+            try:
+                await lease.close()
+            finally:
+                self.sdb.close()
 
     async def _run_commands(
         self,
@@ -876,6 +924,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_PAYLOAD_DIRECTORY,
     )
+    add_bridge_options(parser)
     return parser
 
 
@@ -895,6 +944,8 @@ def run_root_session(
     pull: RootFilePull | None = None,
     shell_port: int = DEFAULT_ROOT_SHELL_PORT,
     shell_connect_timeout: float = DEFAULT_SHELL_CONNECT_TIMEOUT,
+    bridge_token: str | None = None,
+    bridge_port: int = SDB_BRIDGE_PORT,
 ) -> int:
     resolved_callback_host = callback_host or route_callback_host(tv_host)
     config = RootSessionConfig(
@@ -921,7 +972,13 @@ def run_root_session(
 
     session = Qn90fRootSession(
         config,
-        SdbExploitClient(find_sdb(), tv_host, timeout=sdb_timeout),
+        SdbExploitClient(
+            find_sdb(),
+            tv_host,
+            timeout=sdb_timeout,
+            bridge_token=bridge_token,
+            bridge_port=bridge_port,
+        ),
         report_listener,
     )
     return asyncio.run(session.run(commands, script, pull))
@@ -946,6 +1003,8 @@ def main(argv: list[str] | None = None) -> None:
                 commands=arguments.command,
                 shell_port=arguments.shell_port,
                 shell_connect_timeout=arguments.shell_connect_timeout,
+                bridge_token=arguments.bridge_token,
+                bridge_port=arguments.bridge_port,
             )
         )
     except RootAgentError as error:

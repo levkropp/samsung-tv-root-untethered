@@ -207,6 +207,28 @@ not install persistence on the TV. Remote observation and remapping remain off
 until devices and rules are explicitly configured. Native TV event collection
 also remains off until `events.enabled = true` is set for that TV.
 
+## 7. Root while Developer Mode Host PC IP is `127.0.0.1`
+
+An untethered TV keeps `127.0.0.1` as its Developer Mode Host PC IP, so `sdbd`
+authorizes only the TV itself and port `26101` refuses every desktop. The
+`bridge-service` module runs a token-gated relay on the TV
+(`TV:26103` -> `127.0.0.1:26101`) so the host CLI keeps working. `26103` is then
+the only management port open on the LAN, and the token is the whole
+authentication: keep it private.
+
+```console
+samsung-tv-root qn90f root 192.0.2.50 --command 'id' \
+  --bridge-token 0123456789abcdef0123456789abcdef
+```
+
+`--bridge-token` and `--bridge-port` are accepted by `qn90f`, `qn90b` and
+`archive-root` root commands, by `preflight`, and by `qn90f serve`; the token
+also comes from `TVROOT_BRIDGE_TOKEN`. The TV-side token file is
+`/opt/usr/share/selfroot/bridge.conf` (32 lowercase hex characters, mode `0600`).
+
+Both flips in that flow need a reboot: `sdbd` caches the Host PC IP at startup,
+so changing it in the menu does nothing until the TV restarts.
+
 Further end-user details are in the [controller](docs/user/CONTROLLER.md) and
 [remote input](docs/user/REMOTE_POLICY.md) guides. Implementation and reversing
 records are listed separately in the [documentation index](docs/README.md).

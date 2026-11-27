@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import base64
 import os
 import re
@@ -128,6 +129,78 @@ def command_failure(
     )
     return f"{operation} failed with exit {result.returncode}" + (
         f": {detail}" if detail else ""
+    )
+
+
+CONNECT_ATTEMPTS = 3
+CONNECT_BACKOFF_SECONDS = 0.4
+REFUSAL_MARKERS = ("refused", "unauthorized", "not permitted", "authentication")
+TRANSIENT_CONNECT_MARKERS = (
+    "failed to connect",
+    "connection reset",
+    "reset by peer",
+    "closed",
+    "timed out",
+    "no data",
+)
+
+
+def transient_connect_failure(result: subprocess.CompletedProcess[str]) -> bool:
+    """Whether repeating `sdb connect` on a fresh socket can plausibly help.
+
+    sdbd drops a connection mid-handshake most often just after a previous one was torn down, and
+    the command never ran, so a retry is safe. A refusal or an authorization failure is a different
+    answer: nothing is listening, or this peer is not the developer host, and repeating it only
+    delays the message the operator needs.
+    """
+
+    text = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    if any(marker in text for marker in REFUSAL_MARKERS):
+        return False
+    return any(marker in text for marker in TRANSIENT_CONNECT_MARKERS)
+
+
+def connect_with_retries(
+    run: Callable[[tuple[str, ...]], subprocess.CompletedProcess[str]],
+    serial: str,
+    *,
+    attempts: int = CONNECT_ATTEMPTS,
+    backoff: float = CONNECT_BACKOFF_SECONDS,
+    sleep: Callable[[float], None] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """`sdb connect`, retrying only what is safe to retry. Returns the last result either way."""
+    pause = sleep or time.sleep
+    last: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(1, max(1, attempts) + 1):
+        result = run(("connect", serial))
+        if result.returncode == 0:
+            return result
+        last = result
+        if attempt >= attempts or not transient_connect_failure(result):
+            break
+        pause(backoff * attempt)
+        # The endpoint we just lost is still registered; sdb would report it as a device.
+        run(("disconnect", serial))
+    assert last is not None
+    return last
+
+
+def bridge_connect_failure(
+    result: subprocess.CompletedProcess[str],
+    bridged: bool,
+) -> str:
+    """The failure text, plus what to look at next when the bridge was involved."""
+
+    message = command_failure("sdb connect", result)
+    if not bridged:
+        return message
+    return (
+        f"{message}; the bridge relay took the token but sdbd refused the session, so its single "
+        "session belongs to something else. The relay releases a client that went silent after "
+        "about thirty seconds, so a refusal outliving that is the television's doing. bridge.log "
+        "under selfroot-evidence names the leg: `sdbd closed` with `0B to sdbd` is sdbd hanging up "
+        "on a connection it accepted, while `authorized` with no `closed` line would be the relay "
+        "still holding one. A power cycle clears the former"
     )
 
 
@@ -261,6 +334,36 @@ class SdbBridgeProxy:
             finished.set()
 
 
+def add_bridge_options(parser: argparse.ArgumentParser) -> None:
+    """Expose the on-TV relay so a desktop can reach sdbd while devIP is 127.0.0.1."""
+    parser.add_argument(
+        "--bridge-token",
+        default=os.environ.get("TVROOT_BRIDGE_TOKEN"),
+        help="32 lowercase hex characters; defaults to TVROOT_BRIDGE_TOKEN",
+    )
+    parser.add_argument("--bridge-port", type=int, default=SDB_BRIDGE_PORT)
+
+
+def sweep_stale_loopback_devices(
+    run: Callable[[tuple[str, ...]], subprocess.CompletedProcess[str]],
+) -> None:
+    """Disconnect dead ``127.0.0.1:*`` device entries.
+
+    The sdb server holds a single loopback-device slot: a stale entry left by a
+    previous bridge proxy (for example after a TV reboot) makes every new
+    ``sdb connect 127.0.0.1:<proxy>`` fail until it is disconnected
+    (verified live 2026-10-09).
+    """
+    try:
+        result = run(("devices",))
+    except Exception:
+        return
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if fields and fields[0].startswith("127.0.0.1:"):
+            run(("disconnect", fields[0]))
+
+
 class SdbClient:
     def __init__(
         self,
@@ -285,41 +388,32 @@ class SdbClient:
         return f"{self.tv_host}:{SDB_PORT}"
 
     def connect(self) -> None:
-        # The sdb server holds a single loopback-device slot: a stale
-        # 127.0.0.1:* entry (dead proxy, e.g. after a TV reboot) makes every
-        # new `sdb connect 127.0.0.1:<proxy>` fail until it is disconnected.
-        # Sweep them first (verified live 2026-10-09).
         if self.bridge_token:
-            self._sweep_stale_loopback_devices()
-        if self.bridge_token and self._bridge_proxy is None:
-            self._bridge_proxy = SdbBridgeProxy(
-                self.tv_host,
-                self.bridge_port,
-                self.bridge_token,
+            sweep_stale_loopback_devices(
+                lambda arguments: self.run(arguments, check=False)
             )
-            self._bridge_proxy.start()
+            if self._bridge_proxy is None:
+                self._bridge_proxy = SdbBridgeProxy(
+                    self.tv_host,
+                    self.bridge_port,
+                    self.bridge_token,
+                )
+                self._bridge_proxy.start()
         try:
-            result = self.run(("connect", self.serial), check=False)
+            result = connect_with_retries(
+                lambda arguments: self.run(arguments, check=False), self.serial
+            )
         except Exception:
-            if self._bridge_proxy is not None:
-                self._bridge_proxy.close()
-                self._bridge_proxy = None
+            self._release_bridge_proxy()
             raise
         if result.returncode != 0:
-            if self._bridge_proxy is not None:
-                self._bridge_proxy.close()
-                self._bridge_proxy = None
-            raise SdbError(command_failure("sdb connect", result))
+            self._release_bridge_proxy()
+            raise SdbError(bridge_connect_failure(result, bool(self.bridge_token)))
 
-    def _sweep_stale_loopback_devices(self) -> None:
-        try:
-            result = self.run(("devices",), check=False)
-        except Exception:
-            return
-        for line in result.stdout.splitlines():
-            fields = line.split()
-            if fields and fields[0].startswith("127.0.0.1:"):
-                self.run(("disconnect", fields[0]), check=False)
+    def _release_bridge_proxy(self) -> None:
+        if self._bridge_proxy is not None:
+            self._bridge_proxy.close()
+            self._bridge_proxy = None
 
     def require_device(self) -> None:
         result = self.run(("devices",), check=True)

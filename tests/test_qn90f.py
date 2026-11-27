@@ -25,6 +25,14 @@ from samsung_tv_root.root_agent import (
     RootAgentFile,
     RootAgentResult,
 )
+from samsung_tv_root.sdb import SDB_APPINSTALL_PREFIX
+
+
+class _StubSdbClient:
+    """Session tests stub the lease; the client only has to survive close()."""
+
+    def close(self) -> None:
+        pass
 
 
 def completion_output() -> str:
@@ -77,6 +85,54 @@ def test_qn90f_remote_paths_are_always_posix() -> None:
     assert str(REMOTE_STAGING_DIRECTORY / "payload.dll") == (
         "/home/owner/share/tmp/sdk_tools/qn90f-probe/payload.dll"
     )
+
+
+def test_qn90f_exploit_client_connects_through_bridge_proxy(monkeypatch) -> None:
+    client = SdbExploitClient(
+        Path("sdb"),
+        "192.0.2.50",
+        bridge_token="b2" * 16,
+        bridge_port=26104,
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def run(arguments, **kwargs):
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(client, "_run", run)
+    client.connect()
+    serial = client.serial
+    injection = client.inject("id")
+    client.close()
+
+    assert serial.startswith("127.0.0.1:")
+    assert calls[0] == ("devices",)  # stale loopback entries swept first
+    assert calls[1] == ("connect", serial)
+    assert calls[2][:3] == ("-s", serial, "shell")
+    assert calls[2][3].startswith(SDB_APPINSTALL_PREFIX)
+    assert injection.returncode == 0
+
+
+def test_qn90f_exploit_client_closes_proxy_when_connect_fails(monkeypatch) -> None:
+    client = SdbExploitClient(
+        Path("sdb"),
+        "192.0.2.50",
+        bridge_token="b2" * 16,
+        bridge_port=26105,
+    )
+
+    monkeypatch.setattr(
+        client,
+        "_run",
+        lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 1, "", "nope"),
+    )
+
+    with pytest.raises(SdbTransportError, match="sdb connect failed"):
+        client.connect()
+
+    # The proxy is released, so the serial is no longer a live loopback endpoint.
+    assert client.serial == "192.0.2.50:26101"
 
 
 def test_qn90f_push_rejects_sdb_error_with_zero_exit(monkeypatch) -> None:
@@ -145,7 +201,7 @@ def test_qn90f_interactive_session_uses_pty_shell(monkeypatch, tmp_path) -> None
         shell_connect_timeout=12.5,
         payload_files=(),
     )
-    session = Qn90fRootSession(config, object())
+    session = Qn90fRootSession(config, _StubSdbClient())
     monkeypatch.setattr(session.acquirer, "acquire", lambda: _async_value(lease))
     observed: dict[str, object] = {}
 
@@ -261,7 +317,7 @@ def test_qn90f_script_uses_volatile_directory_and_cleans_up(
         payload_directory=tmp_path,
         payload_files=(),
     )
-    session = Qn90fRootSession(config, object())
+    session = Qn90fRootSession(config, _StubSdbClient())
     monkeypatch.setattr(session.acquirer, "acquire", lambda: _async_value(lease))
     monkeypatch.setattr("samsung_tv_root.qn90f.secrets.token_hex", lambda _: "abcd")
     script = RootScript(data=b"exit 7\n", arguments=("one two",))
@@ -368,7 +424,7 @@ def test_qn90f_pull_uses_volatile_chunks_and_verifies_digest(
         payload_directory=tmp_path,
         payload_files=(),
     )
-    session = Qn90fRootSession(config, object())
+    session = Qn90fRootSession(config, _StubSdbClient())
     monkeypatch.setattr(session.acquirer, "acquire", lambda: _async_value(lease))
     monkeypatch.setattr("samsung_tv_root.qn90f.secrets.token_hex", lambda _: "abcd")
     destination = tmp_path / "remote-file"

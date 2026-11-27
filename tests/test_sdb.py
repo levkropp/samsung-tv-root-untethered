@@ -252,3 +252,90 @@ def test_capture_timeout_surfaces_injection_failure(monkeypatch) -> None:
             bind_host="127.0.0.1",
             timeout=0.01,
         )
+
+
+@pytest.mark.parametrize(
+    ("text", "transient"),
+    [
+        ("connecting to 127.0.0.1:41000 ...\nfailed to connect to 127.0.0.1:41000", True),
+        ("read: connection reset by peer", True),
+        ("connection closed before handshake", True),
+        ("connection refused", False),
+        ("error: unauthorized client", False),
+        ("device not found", False),
+    ],
+)
+def test_transient_connect_failure_classification(text: str, transient: bool) -> None:
+    result = subprocess.CompletedProcess(("sdb", "connect"), 1, "", text)
+    assert sdb_module.transient_connect_failure(result) is transient
+
+
+def test_connect_retries_a_handshake_dropped_mid_flight(monkeypatch) -> None:
+    client = SdbClient(
+        Path("sdb"),
+        "192.0.2.50",
+        bridge_token="b2" * 16,
+        bridge_port=26106,
+    )
+    calls: list[tuple[str, ...]] = []
+    slept: list[float] = []
+
+    def run(arguments, **kwargs):
+        calls.append(arguments)
+        attempts = len([call for call in calls if call[0] == "connect"])
+        if arguments[0] == "connect" and attempts < 3:
+            return subprocess.CompletedProcess(
+                arguments, 1, "", "failed to connect to 127.0.0.1:26106"
+            )
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(client, "run", run)
+    monkeypatch.setattr(sdb_module.time, "sleep", slept.append)
+
+    client.connect()
+    retries = calls.count(("disconnect", client.serial))
+    client.disconnect()
+
+    assert len([call for call in calls if call[0] == "connect"]) == 3
+    assert slept == [0.4, 0.8]
+    # each retry first drops the registration of the connection that was just lost
+    assert retries == 2
+
+
+def test_connect_does_not_retry_a_refusal(monkeypatch) -> None:
+    client = SdbClient(Path("sdb"), "192.0.2.50")
+    calls: list[tuple[str, ...]] = []
+
+    def run(arguments, **kwargs):
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 1, "", "Connection refused")
+
+    monkeypatch.setattr(client, "run", run)
+
+    with pytest.raises(SdbError, match="Connection refused"):
+        client.connect()
+
+    assert calls == [("connect", "192.0.2.50:26101")]
+
+
+def test_bridged_connect_failure_names_the_held_session(monkeypatch) -> None:
+    client = SdbClient(
+        Path("sdb"),
+        "192.0.2.50",
+        bridge_token="b2" * 16,
+        bridge_port=26107,
+    )
+
+    def run(arguments, **kwargs):
+        return subprocess.CompletedProcess(arguments, 1, "", "failed to connect")
+
+    monkeypatch.setattr(client, "run", run)
+    monkeypatch.setattr(sdb_module.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(SdbError) as failure:
+        client.connect()
+
+    message = str(failure.value)
+    assert "sdb connect failed with exit 1" in message
+    assert "sdbd refused the session" in message
+    assert client.serial == "192.0.2.50:26101"  # the proxy was released

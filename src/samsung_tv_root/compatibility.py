@@ -307,6 +307,7 @@ QN90F_PROFILE = ExploitCompatibilityProfile(
             "T-RSMFUBAC-0090-REL-202607141954",
         )
     ),
+    compatible_build_prefixes=("T-RSMFUABC-0090-REL-",),
     additional_tested_builds=frozenset(
         ("T-RSMFUABC-0090-REL-202607141954",)
     ),
